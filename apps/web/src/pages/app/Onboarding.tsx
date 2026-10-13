@@ -10,6 +10,7 @@ import { Logo } from "@/components/brand/Logo";
 import { Button } from "@/components/ui/Button";
 import { Field, Input, Select } from "@/components/ui/Field";
 import { BusinessForm } from "@/components/business/BusinessForm";
+import { DemoButton } from "@/components/business/DemoButton";
 
 const STEPS = ["Workspace", "Business", "Goals", "Connect", "Dashboard", "Ask"] as const;
 
@@ -94,6 +95,9 @@ export function Onboarding() {
               <div>
                 <h1 className="text-2xl font-semibold">Add your first business</h1>
                 <p className="mt-1 text-sm text-muted">Connections, dashboards, conversations and goals all belong to a business. You can add more later.</p>
+                <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-demo/25 bg-demo/5 px-3 py-2 text-xs text-muted">
+                  Want to look around first? <DemoButton workspaceId={workspaceId} variant="ghost" label="Open a labelled demo business" />
+                </div>
               </div>
               <BusinessForm
                 submitLabel="Create business"

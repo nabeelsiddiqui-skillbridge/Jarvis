@@ -12,6 +12,7 @@ import { EmptyState, ErrorState } from "@/components/ui/EmptyState";
 import { Input } from "@/components/ui/Field";
 import { Skeleton } from "@/components/ui/Spinner";
 import { CreateBusinessDialog } from "@/components/business/CreateBusinessDialog";
+import { DemoButton } from "@/components/business/DemoButton";
 
 export function Businesses() {
   const { workspaceId } = useParams();
@@ -28,7 +29,7 @@ export function Businesses() {
       <PageHeader
         title="Businesses"
         description="Each business keeps its own connections, dashboards, conversations, goals and permissions."
-        actions={canCreate ? <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setCreating(true)}>New business</Button> : <span className="text-xs text-subtle">Only workspace owners can add businesses.</span>}
+        actions={canCreate ? <>{!list.data?.some((b) => b.isDemo) && workspaceId && <DemoButton workspaceId={workspaceId} />}<Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setCreating(true)}>New business</Button></> : <span className="text-xs text-subtle">Only workspace owners can add businesses.</span>}
       />
       <div className="relative mb-5 max-w-sm">
         <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-subtle" />

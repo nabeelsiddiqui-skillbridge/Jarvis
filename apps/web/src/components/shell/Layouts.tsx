@@ -5,6 +5,7 @@ import { cn } from "@/lib/cn";
 import { patch } from "@/lib/api";
 import { BusinessContext, rememberBusiness, useBusinessQuery, useBusinesses } from "@/lib/business";
 import { useMe } from "@/lib/session";
+import { useBusinessEvents } from "@/lib/metrics";
 import { ErrorState } from "@/components/ui/EmptyState";
 import { PageLoader } from "@/components/ui/Spinner";
 import { Sidebar } from "./Sidebar";
@@ -85,6 +86,7 @@ export function BusinessLayout() {
   if (!b) return <PageLoader />;
   return (
     <BusinessContext.Provider value={b}>
+      <BusinessEvents businessId={b.id} />
       <AppShell workspaceId={b.workspaceId} business={b}>
         <Outlet key={b.id} />
       </AppShell>
@@ -105,4 +107,10 @@ export function WorkspaceLayout() {
       <Outlet key={ws.id} />
     </AppShell>
   );
+}
+
+/** Live updates for the active business (re-subscribes on switch). */
+function BusinessEvents({ businessId }: { businessId: string }) {
+  useBusinessEvents(businessId);
+  return null;
 }

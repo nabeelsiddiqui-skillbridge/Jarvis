@@ -9,6 +9,8 @@ import { AppIndex } from "./pages/app/AppIndex";
 import { Onboarding } from "./pages/app/Onboarding";
 import { BusinessLayout, WorkspaceLayout } from "./components/shell/Layouts";
 import { CommandCenter } from "./pages/app/CommandCenter";
+import { Dashboards } from "./pages/app/Dashboards";
+import { DashboardView } from "./pages/app/DashboardView";
 import { Businesses } from "./pages/app/Businesses";
 import { BusinessSettings } from "./pages/app/BusinessSettings";
 import { Team } from "./pages/app/Team";
@@ -37,7 +39,8 @@ export const router = createBrowserRouter([
         children: [
           { index: true, element: <CommandCenter /> },
           { path: "assistant", element: <StagePlaceholder area="AI Assistant" stage={5} /> },
-          { path: "dashboards/*", element: <StagePlaceholder area="Dashboards" stage={2} /> },
+          { path: "dashboards", element: <Dashboards /> },
+          { path: "dashboards/:dashboardId", element: <DashboardView /> },
           { path: "connections", element: <StagePlaceholder area="Connections" stage={3} /> },
           { path: "insights", element: <StagePlaceholder area="Insights" stage={7} /> },
           { path: "automations", element: <StagePlaceholder area="Automations" stage={7} /> },

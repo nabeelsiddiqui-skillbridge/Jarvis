@@ -8,6 +8,10 @@ import { errorHandler } from "./lib/errors.js";
 import { authRouter } from "./routes/auth.js";
 import { businessesRouter } from "./routes/businesses.js";
 import { invitesRouter, workspacesRouter } from "./routes/workspaces.js";
+import { metricsRouter } from "./routes/metrics.js";
+import { dashboardsRouter } from "./routes/dashboards.js";
+import { eventsRouter } from "./routes/events.js";
+import { overviewRouter } from "./routes/overview.js";
 
 export function createApp() {
   const app = express();
@@ -47,6 +51,10 @@ export function createApp() {
   app.use("/api/workspaces", workspacesRouter);
   app.use("/api/invites", invitesRouter);
   app.use("/api", businessesRouter);
+  app.use("/api", metricsRouter);
+  app.use("/api", dashboardsRouter);
+  app.use("/api", eventsRouter);
+  app.use("/api", overviewRouter);
 
   app.use("/api", (_req, res) => res.status(404).json({ error: { code: "not_found", message: "Unknown API route." } }));
 

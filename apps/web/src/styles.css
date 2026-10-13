@@ -73,6 +73,11 @@
     background-size: 200% 100%;
     animation: var(--animate-shimmer);
   }
+  .select-chevron {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394A3B8' stroke-width='2'><path d='m6 9 6 6 6-6'/></svg>");
+    background-position: right 0.75rem center;
+    background-repeat: no-repeat;
+  }
   .text-gradient {
     background: linear-gradient(90deg, var(--color-accent), var(--color-violet));
     -webkit-background-clip: text;

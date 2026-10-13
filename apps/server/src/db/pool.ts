@@ -19,6 +19,17 @@ pool.on("error", (err) => console.error("[db] idle client error", err.message));
 export type Db = pg.PoolClient | pg.Pool;
 
 /**
+ * COMMIT on a transaction that had a failed statement silently rolls back.
+ * Treat that as an error so a swallowed failure can never look like success.
+ */
+async function commit(client: pg.PoolClient) {
+  const r = await client.query("COMMIT");
+  if ((r as unknown as { command?: string }).command === "ROLLBACK") {
+    throw new Error("Transaction was rolled back because a statement inside it failed");
+  }
+}
+
+/**
  * Run `fn` in a transaction as the restricted `bca_app` role with the user id
  * set, so row-level security applies. Use for every user-initiated request.
  */
@@ -29,7 +40,7 @@ export async function withUser<T>(userId: string, fn: (db: pg.PoolClient) => Pro
     await client.query("SET LOCAL ROLE bca_app");
     await client.query("SELECT set_config('app.user_id', $1, true)", [userId]);
     const result = await fn(client);
-    await client.query("COMMIT");
+    await commit(client);
     return result;
   } catch (err) {
     await client.query("ROLLBACK").catch(() => undefined);
@@ -48,7 +59,7 @@ export async function withSystem<T>(fn: (db: pg.PoolClient) => Promise<T>): Prom
   try {
     await client.query("BEGIN");
     const result = await fn(client);
-    await client.query("COMMIT");
+    await commit(client);
     return result;
   } catch (err) {
     await client.query("ROLLBACK").catch(() => undefined);
