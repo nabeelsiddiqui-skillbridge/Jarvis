@@ -5,3 +5,4 @@ export * from "./dates.js";
 export * from "./widgets.js";
 export * from "./calc.js";
 export * from "./templates.js";
+export * from "./assistant.js";

@@ -10,13 +10,14 @@ import { BusinessAvatar, UserAvatar } from "@/components/ui/Avatar";
 import { IconButton } from "@/components/ui/Button";
 import { Popover } from "@/components/ui/Popover";
 
-export function TopBar({ business, title, workspaceId, onMenu, assistantOpen, onToggleAssistant }: {
+export function TopBar({ business, title, workspaceId, onMenu, assistantOpen, onToggleAssistant, showAssistantToggle = true }: {
   business: Business | null;
   title?: string;
   workspaceId: string;
   onMenu: () => void;
   assistantOpen: boolean;
   onToggleAssistant: () => void;
+  showAssistantToggle?: boolean;
 }) {
   const me = useMe();
   const nav = useNavigate();
@@ -54,7 +55,7 @@ export function TopBar({ business, title, workspaceId, onMenu, assistantOpen, on
       )}
 
       <div className="flex items-center gap-1">
-        {business && (
+        {business && showAssistantToggle && (
           <IconButton label={assistantOpen ? "Hide assistant" : "Show assistant"} onClick={onToggleAssistant} className="hidden xl:inline-grid">
             {assistantOpen ? <PanelRightClose className="size-5" /> : <PanelRightOpen className="size-5" />}
           </IconButton>

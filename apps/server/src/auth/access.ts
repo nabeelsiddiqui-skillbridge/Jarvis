@@ -43,8 +43,18 @@ export async function inBusiness<T>(
 ): Promise<T> {
   const user = req.user;
   if (!user) throw unauthorized();
+  return inBusinessAs(user.id, businessId, permission, fn);
+}
+
+/** Same as inBusiness, for work that outlives the request transaction (e.g. assistant tool calls). */
+export async function inBusinessAs<T>(
+  userId: string,
+  businessId: unknown,
+  permission: Permission,
+  fn: (ctx: BusinessCtx) => Promise<T>,
+): Promise<T> {
   if (!isUuid(businessId)) throw notFound("Business");
-  return withUser(user.id, async (db) => {
+  return withUser(userId, async (db) => {
     const { rows } = await db.query(
       `SELECT b.*, app.business_role(b.id) AS role FROM businesses b WHERE b.id = $1 AND b.archived_at IS NULL`,
       [businessId],
@@ -53,7 +63,7 @@ export async function inBusiness<T>(
     if (!row || !row.role) throw notFound("Business");
     const role = row.role as EffectiveBusinessRole;
     if (!can(role, permission)) throw forbidden(`Your role (${role}) can't do this. Ask a business administrator.`);
-    return fn({ db, userId: user.id, business: row as BusinessRow, role });
+    return fn({ db, userId, business: row as BusinessRow, role });
   });
 }
 

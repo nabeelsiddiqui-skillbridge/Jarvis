@@ -18,6 +18,7 @@ import { Team } from "./pages/app/Team";
 import { WorkspaceSettings } from "./pages/app/WorkspaceSettings";
 import { Account } from "./pages/app/Account";
 import { StagePlaceholder } from "./pages/app/StagePlaceholder";
+import { Assistant } from "./pages/app/Assistant";
 import { NotFound } from "./pages/NotFound";
 
 export const router = createBrowserRouter([
@@ -39,7 +40,7 @@ export const router = createBrowserRouter([
         element: <BusinessLayout />,
         children: [
           { index: true, element: <CommandCenter /> },
-          { path: "assistant", element: <StagePlaceholder area="AI Assistant" stage={5} /> },
+          { path: "assistant", element: <Assistant /> },
           { path: "dashboards", element: <Dashboards /> },
           { path: "dashboards/:dashboardId", element: <DashboardView /> },
           { path: "connections", element: <Connections /> },

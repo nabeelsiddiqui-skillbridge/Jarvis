@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Navigate, Outlet, useParams } from "react-router";
+import { Navigate, Outlet, useMatch, useParams } from "react-router";
 import type { Business } from "@bca/shared";
 import { cn } from "@/lib/cn";
 import { patch } from "@/lib/api";
@@ -16,6 +16,8 @@ import { MobileTabBar } from "./MobileTabBar";
 function AppShell({ workspaceId, business, navBusiness = business, title, children }: { workspaceId: string; business: Business | null; navBusiness?: Business | null; title?: string; children: ReactNode }) {
   const me = useMe();
   const [drawer, setDrawer] = useState(false);
+  // The Assistant page is a full-height chat: no page padding, and no duplicate side panel.
+  const fullBleed = Boolean(useMatch("/app/b/:businessId/assistant"));
   const [assistantOpen, setAssistantOpen] = useState(me.data?.preferences.assistantPanelOpen ?? true);
   const toggleAssistant = () => {
     const next = !assistantOpen;
@@ -47,12 +49,16 @@ function AppShell({ workspaceId, business, navBusiness = business, title, childr
       </div>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar business={business} title={title} workspaceId={workspaceId} onMenu={() => setDrawer(true)} assistantOpen={assistantOpen} onToggleAssistant={toggleAssistant} />
+        <TopBar business={business} title={title} workspaceId={workspaceId} onMenu={() => setDrawer(true)} assistantOpen={assistantOpen} onToggleAssistant={toggleAssistant} showAssistantToggle={!fullBleed} />
         <div className="flex min-h-0 flex-1">
-          <main id="main" tabIndex={-1} className="min-w-0 flex-1 overflow-y-auto px-4 pb-24 pt-6 focus:outline-none sm:px-6 lg:px-8 lg:pb-10">
-            <div className="mx-auto max-w-[1400px]">{children}</div>
-          </main>
-          {business && assistantOpen && <AssistantPanel business={business} onClose={toggleAssistant} />}
+          {fullBleed ? (
+            <main id="main" tabIndex={-1} className="flex min-w-0 flex-1 flex-col overflow-hidden pb-[calc(3rem+env(safe-area-inset-bottom))] focus:outline-none lg:pb-0">{children}</main>
+          ) : (
+            <main id="main" tabIndex={-1} className="min-w-0 flex-1 overflow-y-auto px-4 pb-24 pt-6 focus:outline-none sm:px-6 lg:px-8 lg:pb-10">
+              <div className="mx-auto max-w-[1400px]">{children}</div>
+            </main>
+          )}
+          {business && assistantOpen && !fullBleed && <AssistantPanel business={business} onClose={toggleAssistant} />}
         </div>
       </div>
       <MobileTabBar business={navBusiness} workspaceId={workspaceId} onMore={() => setDrawer(true)} />

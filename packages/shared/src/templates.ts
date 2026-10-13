@@ -88,8 +88,8 @@ export const TEMPLATES: Record<string, { name: string; description: string; indu
 export type TemplateId = keyof typeof TEMPLATES;
 
 /** Pack blueprints into a 12-column grid, left to right. */
-function pack(blueprints: Blueprint[]): { x: number; y: number; w: number; h: number }[] {
-  let x = 0, y = 0, rowH = 0;
+export function pack(blueprints: { w: number; h: number }[], startY = 0): { x: number; y: number; w: number; h: number }[] {
+  let x = 0, y = startY, rowH = 0;
   return blueprints.map((b) => {
     if (x + b.w > 12) {
       x = 0;

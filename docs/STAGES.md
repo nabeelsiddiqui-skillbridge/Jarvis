@@ -182,3 +182,63 @@ Status of each stage of the build plan: what works, what is simulated, and what 
    - a public app with redirect URL `<API_URL>/api/oauth/hubspot/callback` and the scopes `oauth crm.objects.contacts.read crm.objects.deals.read`;
    - set `HUBSPOT_CLIENT_ID` and `HUBSPOT_CLIENT_SECRET`;
    - optionally, webhook subscriptions pointing at `<API_URL>/api/webhooks/hubspot`.
+
+## Stage 5 — Text assistant with evidence-backed answers and AI dashboard generation ✅
+
+**Works**
+- **Assistant** (`apps/server/src/assistant/`) on the Claude API (`@anthropic-ai/sdk`).
+  - Uses model `claude-opus-5-5` by default (`ASSISTANT_MODEL`), adaptive thinking, and an explicit reasoning effort (`ASSISTANT_EFFORT`, default medium).
+  - Replies stream to the browser.
+  - Server-side refusal fallback is enabled (`fallbacks: "default"`).
+  - The fixed rules prompt is cached, and the business context follows it.
+- **Read-only tools, each run in its own short transaction with the signed-in user's permissions under row-level security, for the conversation's one business:**
+  - `list_available_metrics`
+  - `query_metric` (the same engine as dashboards: availability, partial coverage, sources, freshness, limitations)
+  - `get_data_status`
+  - `get_goals`
+  - `list_dashboards` / `get_dashboard`
+  - `propose_dashboard`
+- Tool inputs are validated on the server (they stream eagerly and aren't validated by the API). Invalid input is returned to the model as an error and never executed.
+- **Evidence**: every query result becomes a numbered evidence item (E1, E2… unique within a conversation).
+  - It is built by the server from the exact result the model saw: value, period, comparison, definition/formula, breakdown, sources with sync time and data-through date, staleness, limitations and demo labelling.
+  - Answers cite evidence inline (`[E3]`), and citations open the evidence card.
+  - The model writes prose only; it never writes the evidence.
+- **Prompt rules**: no invented figures, state periods, say when data is unavailable or partial, keep revenue families separate, treat campaign/query/page/CRM text from connected accounts as data (never instructions), single-business scope (portfolio questions are declined with an explanation), read-only.
+- **Conversations** are stored per user and per business (RLS: only their author can read them, even teammates on the same business can't). History is replayed append-only, exactly as returned, so prompt caching and thinking-block replay stay valid. Refused, failed or cut-off tool turns are never replayed. Fallback turns are sanitized as the API requires.
+- **AI dashboard generation**:
+  - The model proposes a declarative spec. Widgets are validated against the widget schema and the business's available data; invalid widgets are reported back so the model can fix them.
+  - Nothing is saved until the user previews (live data) and applies.
+  - Applying uses optimistic concurrency against the version the proposal was based on, records the resulting version, and can be undone (a created dashboard is deleted; an edit restores the prior version) as long as it wasn't edited since.
+  - Viewers can ask questions but can't apply dashboard changes.
+- **UI**:
+  - Collapsible assistant panel on desktop, scoped to the active business and remounted on a switch.
+  - Full Assistant page with conversation history, which is full-screen on phones.
+  - Streaming text with step indicators, a stop button, suggested questions, and a safe markdown renderer (tables, lists; no HTML injection).
+  - Citation chips, evidence cards, and proposal cards with Preview / Create / Discard / Open / Undo.
+  - Shows a clear prerequisite when the platform has no AI key.
+- **Limits**: 20 messages/minute per user and a daily per-user cap (`ASSISTANT_DAILY_MESSAGES`). Token usage is recorded per reply for billing in Stage 9.
+
+**Verified**
+- `apps/server/test/assistant.test.ts` runs the real SDK against a local scripted stand-in of the streaming Messages API. Covered:
+  - the streaming event order;
+  - evidence equal to the metrics API result for the same query;
+  - the request shape (adaptive thinking, explicit effort, `fallbacks: "default"` + beta header, eager input streaming, no forced tool choice, cached rules);
+  - append-only replay with thinking blocks and signatures unchanged, and earlier request bodies being exact prefixes of later ones;
+  - conversation-wide evidence numbering;
+  - invalid tool input rejected;
+  - refusals not stored for replay;
+  - dashboard proposal → validation retry → preview → apply → duplicate apply rejected (409) → undo (and the status survives reload);
+  - privacy from other users and teammates;
+  - viewers can't propose;
+  - breakdown shares are percentages summing to 100;
+  - tools refuse another business id;
+  - 412 with a clear message when no key is configured.
+- Browser walkthrough (desktop and 390px): ask in the panel → streamed answer with E1 → evidence card → channel breakdown table → full page → dashboard proposal → live preview → create → open dashboard → undo → reload on mobile shows "Undone".
+- This walkthrough found and fixed two bugs: breakdown shares were 100× too large, and undoing a created dashboard deleted the proposal record.
+
+**Simulated / not verified live**
+- No Anthropic API key was available in this environment. Every assistant flow ran against the scripted stand-in, which checks plumbing, security and evidence, not answer quality. **Live verification with a real key is still required**, ideally with an evaluation set of real business questions.
+
+**External setup required**
+- `ANTHROPIC_API_KEY` (server only). Optionally `ASSISTANT_MODEL`, `ASSISTANT_EFFORT` and `ASSISTANT_DAILY_MESSAGES`.
+- Server-side fallbacks and the `fallbacks` parameter apply on the Claude API directly.

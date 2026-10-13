@@ -152,8 +152,8 @@ function CommentaryWidget({ widget, actions, editing }: WidgetProps) {
         {actions}
       </header>
       <div className="widget-nodrag flex-1 overflow-auto px-4 py-2">
-        <Prerequisite title="AI commentary arrives with the assistant (build stage 5)">
-          This widget will summarize what changed on this dashboard, citing the widgets' data. It never shows text until real analysis is available.
+        <Prerequisite title="Automatic commentary arrives with insights (build stage 7)">
+          This widget will summarize what changed on this dashboard, citing the widgets' data. Until then it shows no text — ask the assistant for an evidence-backed explanation instead.
         </Prerequisite>
       </div>
     </section>
