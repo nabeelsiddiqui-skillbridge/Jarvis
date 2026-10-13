@@ -2,6 +2,7 @@ import { pool } from "../db/pool.js";
 import { getConnector } from "../connectors/registry.js";
 import { enqueue, recoverStuck } from "./queue.js";
 import { scheduleAutomations } from "../automations/engine.js";
+import { expireOld } from "../actions/engine.js";
 
 /**
  * Periodic work, safe to run from several workers (dedupe keys collapse duplicates):
@@ -13,6 +14,7 @@ import { scheduleAutomations } from "../automations/engine.js";
 export async function scheduleDueWork() {
   await recoverStuck();
   await scheduleAutomations();
+  await expireOld(pool);
   // Daily insight detection for businesses with data (also runs after each sync).
   const due = await pool.query(
     `SELECT b.id, b.workspace_id FROM businesses b

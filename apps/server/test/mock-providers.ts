@@ -44,7 +44,11 @@ export interface GoogleState {
   accessTokens: Map<string, string[]>; // token → scopes
   refreshTokens: Map<string, string[]>;
   adsTokenApproved: boolean;
-  calls: { refresh: number; revoke: number; runReport: number; gscQuery: number; adsSearch: number };
+  calls: { refresh: number; revoke: number; runReport: number; gscQuery: number; adsSearch: number; mutates: number; validateOnly: number };
+  /** Campaign settings per customer (for actions). */
+  campaigns: Record<string, { id: string; name: string; status: "ENABLED" | "PAUSED"; budgetId: string; budgetMicros: number; shared: boolean }[]>;
+  /** Failure injection for mutations: apply the change but answer 503 (ambiguous), or fail before applying. */
+  mutateFail: { applyThen503: number; before503: number; reject400: number };
   fail: { next503: number };
 }
 
@@ -117,7 +121,13 @@ export async function startMockGoogle(port = 0) {
   const state: GoogleState = {
     ga4: makeGa4(), gsc: makeGsc(), ads: makeAds(), gscLagDays: 2,
     accessTokens: new Map(), refreshTokens: new Map(), adsTokenApproved: true,
-    calls: { refresh: 0, revoke: 0, runReport: 0, gscQuery: 0, adsSearch: 0 }, fail: { next503: 0 },
+    campaigns: Object.fromEntries(["2222222222", "3333333333"].map((cid) => [cid, [
+      { id: "101", name: "Brand Search", status: "ENABLED" as const, budgetId: "9101", budgetMicros: 50_000_000, shared: false },
+      { id: "102", name: "Performance Max — All products", status: "ENABLED" as const, budgetId: "9102", budgetMicros: 120_000_000, shared: false },
+      { id: "103", name: "Shopping — Jackets", status: "PAUSED" as const, budgetId: "9100", budgetMicros: 30_000_000, shared: true },
+    ]])),
+    mutateFail: { applyThen503: 0, before503: 0, reject400: 0 },
+    calls: { refresh: 0, revoke: 0, runReport: 0, gscQuery: 0, adsSearch: 0, mutates: 0, validateOnly: 0 }, fail: { next503: 0 },
   };
   const app = express();
   app.use(express.json());
@@ -294,6 +304,14 @@ export async function startMockGoogle(port = 0) {
       return res.json([{ results: rows }]);
     }
     if (/FROM customer\b/.test(q)) return res.json([{ results: [{ customer: { resourceName: `customers/${id}`, id } }] }]);
+    if (/FROM campaign WHERE campaign\.status != 'REMOVED'/.test(q)) {
+      const only = /campaign\.id = (\d+)/.exec(q)?.[1];
+      const rows = (state.campaigns[id] ?? []).filter((c) => !only || c.id === only).map((c) => ({
+        campaign: { resourceName: `customers/${id}/campaigns/${c.id}`, id: c.id, name: c.name, status: c.status, campaignBudget: `customers/${id}/campaignBudgets/${c.budgetId}` },
+        campaignBudget: { resourceName: `customers/${id}/campaignBudgets/${c.budgetId}`, amountMicros: String(c.budgetMicros), explicitlyShared: c.shared },
+      }));
+      return res.json([{ results: rows }]);
+    }
     const m = /segments\.date BETWEEN '(\d{4}-\d{2}-\d{2})' AND '(\d{4}-\d{2}-\d{2})'/.exec(q);
     if (!m || !/FROM campaign/.test(q)) return res.status(400).json({ error: { code: 400, message: "unsupported query" } });
     const results = state.ads.filter((r) => r.customer === id && r.date >= m[1]! && r.date <= m[2]!).map((r) => ({
@@ -307,6 +325,24 @@ export async function startMockGoogle(port = 0) {
     res.json(batches.length ? batches : [{ fieldMask: "", requestId: "req" }]);
   });
 
+  app.post(/^\/googleads\.googleapis\.com\/v\d+\/customers\/(\d+)\/(campaigns|campaignBudgets):mutate$/, (req, res) => {
+    if (!adsGate(req, res)) return;
+    const [id, resource] = [(req.params as any)[0] as string, (req.params as any)[1] as string];
+    const op = req.body.operations?.[0]?.update;
+    const list = state.campaigns[id] ?? [];
+    const c = resource === "campaigns" ? list.find((x) => op?.resourceName === `customers/${id}/campaigns/${x.id}`) : list.find((x) => op?.resourceName === `customers/${id}/campaignBudgets/${x.budgetId}`);
+    if (!c) return res.status(400).json({ error: { code: 400, status: "INVALID_ARGUMENT", message: "Resource not found" } });
+    if (resource === "campaignBudgets" && Number(op.amountMicros) % 10_000 !== 0) return res.status(400).json({ error: { code: 400, status: "INVALID_ARGUMENT", message: "NON_MULTIPLE_OF_MINIMUM_CURRENCY_UNIT" } });
+    if (req.body.validateOnly) { state.calls.validateOnly++; return res.json({}); }
+    if (state.mutateFail.reject400 > 0) { state.mutateFail.reject400--; return res.status(400).json({ error: { code: 400, status: "INVALID_ARGUMENT", message: "OPERATION_NOT_PERMITTED_FOR_CONTEXT" } }); }
+    if (state.mutateFail.before503 > 0) { state.mutateFail.before503--; return res.status(503).json({ error: { code: 503, status: "UNAVAILABLE" } }); }
+    state.calls.mutates++;
+    if (resource === "campaigns") c.status = op.status;
+    else for (const x of list.filter((y) => y.budgetId === c.budgetId)) x.budgetMicros = Number(op.amountMicros);
+    if (state.mutateFail.applyThen503 > 0) { state.mutateFail.applyThen503--; return res.status(503).json({ error: { code: 503, status: "UNAVAILABLE" } }); }
+    res.json({ results: [{ resourceName: op.resourceName }] });
+  });
+
   app.use((req, res) => res.status(404).json({ error: { code: 404, message: `mock: no route ${req.method} ${req.path}` } }));
   const srv = await listen(app, port);
   return { ...srv, state };
@@ -316,7 +352,7 @@ export async function startMockGoogle(port = 0) {
 
 export const HUBSPOT_TZ = "America/Chicago";
 export interface HsContact { id: string; createdate: string; lastmodifieddate: string; lifecyclestage: string; source: string; mql: string | null; sql: string | null }
-export interface HsDeal { id: string; createdate: string; lastmodifieddate: string; closedate: string | null; pipeline: string; dealstage: string; amount: number | null; status: "open" | "won" | "lost" }
+export interface HsDeal { id: string; createdate: string; lastmodifieddate: string; closedate: string | null; pipeline: string; dealstage: string; amount: number | null; status: "open" | "won" | "lost"; name?: string }
 
 export interface HubSpotState {
   contacts: HsContact[];
@@ -324,7 +360,7 @@ export interface HubSpotState {
   accessTokens: Set<string>;
   refreshTokens: Set<string>;
   searchCap: number;
-  calls: { refresh: number; revoke: number; search: number; batchRead: number };
+  calls: { refresh: number; revoke: number; search: number; batchRead: number; patches: number };
 }
 
 const PIPELINES = [
@@ -375,12 +411,13 @@ export function contactProps(c: HsContact) {
 export function dealProps(d: HsDeal) {
   return {
     createdate: d.createdate, hs_lastmodifieddate: d.lastmodifieddate, closedate: d.closedate, pipeline: d.pipeline, dealstage: d.dealstage,
-    amount_in_home_currency: d.amount == null ? null : String(d.amount), hs_is_closed: String(d.status !== "open"), hs_is_closed_won: String(d.status === "won"), hs_object_id: d.id,
+    amount_in_home_currency: d.amount == null ? null : String(d.amount), hs_is_closed: String(d.status !== "open"), hs_is_closed_won: String(d.status === "won"), hs_object_id: d.id, dealname: d.name ?? `Deal ${d.id}`,
   };
 }
 
 export async function startMockHubSpot(port = 0) {
-  const state: HubSpotState = { ...makeHubSpot(), accessTokens: new Set(), refreshTokens: new Set(), searchCap: 10_000, calls: { refresh: 0, revoke: 0, search: 0, batchRead: 0 } };
+  const state: HubSpotState = { ...makeHubSpot(), accessTokens: new Set(), refreshTokens: new Set(), searchCap: 10_000, calls: { refresh: 0, revoke: 0, search: 0, batchRead: 0, patches: 0 } };
+  state.deals.forEach((d, i) => (d.name = `${["Acme", "Globex", "Initech", "Umbrella", "Hooli"][i % 5]} — order ${9000 + i}`));
   const app = express();
   app.use(express.json());
   app.use(express.urlencoded({ extended: false }));
@@ -437,8 +474,8 @@ export async function startMockHubSpot(port = 0) {
       if (after + limit > state.searchCap) return res.status(400).json({ status: "error", message: `Paging beyond ${state.searchCap} results is not supported`, category: "VALIDATION_ERROR" });
       const modProp = object === "contacts" ? "lastmodifieddate" : "hs_lastmodifieddate";
       const all = (object === "contacts" ? state.contacts.map((c) => ({ id: c.id, properties: contactProps(c) })) : state.deals.map((d) => ({ id: d.id, properties: dealProps(d) })))
-        .filter((o: any) => !f || (f.propertyName === modProp && f.operator === "GTE" && Date.parse(o.properties[modProp]) >= Number(f.value)))
-        .sort((a: any, z: any) => Date.parse(a.properties[modProp]) - Date.parse(z.properties[modProp]));
+        .filter((o: any) => !f || (f.propertyName === modProp && f.operator === "GTE" ? Date.parse(o.properties[modProp]) >= Number(f.value) : f.operator === "EQ" ? String(o.properties[f.propertyName]) === String(f.value) : true))
+        .sort((a: any, z: any) => (b.sorts?.[0]?.direction === "DESCENDING" ? -1 : 1) * (Date.parse(a.properties[modProp]) - Date.parse(z.properties[modProp])));
       const page = all.slice(after, after + limit);
       res.json({ total: all.length, results: page, ...(after + limit < all.length ? { paging: { next: { after: String(after + limit) } } } : {}) });
     });
@@ -452,6 +489,26 @@ export async function startMockHubSpot(port = 0) {
       res.json({ status: "COMPLETE", results });
     });
   }
+  app.get("/api.hubapi.com/crm/v3/objects/deals/:id", (req, res) => {
+    if (!authed(req, res)) return;
+    const d = state.deals.find((x) => x.id === req.params.id);
+    if (!d) return res.status(404).json({ status: "error", message: "Object not found" });
+    res.json({ id: d.id, properties: dealProps(d), updatedAt: d.lastmodifieddate });
+  });
+  app.patch("/api.hubapi.com/crm/v3/objects/deals/:id", (req, res) => {
+    if (!authed(req, res)) return;
+    const d = state.deals.find((x) => x.id === req.params.id);
+    if (!d) return res.status(404).json({ status: "error", message: "Object not found" });
+    const stage = req.body?.properties?.dealstage;
+    const pipe = PIPELINES.find((p) => p.id === d.pipeline)!;
+    const st = pipe.stages.find((x) => x[0] === stage);
+    if (!st) return res.status(400).json({ status: "error", category: "VALIDATION_ERROR", message: "Invalid stage" });
+    state.calls.patches++;
+    d.dealstage = stage;
+    d.status = st[2] ? (st[3] ? "won" : "lost") : "open";
+    d.lastmodifieddate = new Date().toISOString();
+    res.json({ id: d.id, properties: dealProps(d), updatedAt: d.lastmodifieddate });
+  });
   app.use((req, res) => res.status(404).json({ status: "error", message: `mock: no route ${req.method} ${req.path}` }));
   const srv = await listen(app, port);
   return { ...srv, state };

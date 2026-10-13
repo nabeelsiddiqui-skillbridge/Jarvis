@@ -13,6 +13,7 @@ import { explainInsight } from "../insights/explain.js";
 import { aiConfigured } from "../ai/complete.js";
 import { executeRun, fireEvent, markRunFailed } from "../automations/engine.js";
 import { buildReport, reportPeriod, saveReport, type ReportKind } from "../reports/build.js";
+import { executeProposal, giveUp } from "../actions/engine.js";
 
 async function loadConnection(db: pg.PoolClient, id: string): Promise<ConnectionRow | null> {
   const { rows } = await db.query(`SELECT * FROM connections WHERE id = $1 AND disconnected_at IS NULL`, [id]);
@@ -81,6 +82,8 @@ export async function runJob(job: Job) {
         return await automationJob(db, job);
       case "report.generate":
         return await reportJob(db, job);
+      case "action.execute":
+        return await actionJob(db, job);
       default:
         await fail(db, job, `Unknown job type ${job.type}`, { retryable: false });
     }
@@ -248,5 +251,22 @@ async function reportJob(db: pg.PoolClient, job: Job) {
   } catch (err) {
     console.error(`[job ${job.id}] report failed`, err);
     await fail(db, job, (err as Error).message, { retryable: true });
+  }
+}
+
+/** Approved external action. "retry" = outcome unknown; the next attempt checks provider state first. */
+async function actionJob(db: pg.PoolClient, job: Job) {
+  try {
+    const r = await executeProposal(db, job.payload.proposalId);
+    if (r === "retry") {
+      const outcome = await fail(db, job, "Waiting to confirm the change with the provider", { retryable: true, retryAfterMs: Math.min(60_000 * 2 ** (job.attempts - 1), 15 * 60_000) });
+      if (outcome === "failed") await giveUp(db, job.payload.proposalId);
+      return;
+    }
+    await complete(db, job.id, { outcome: r });
+  } catch (err) {
+    console.error(`[job ${job.id}] action failed`, err);
+    const outcome = await fail(db, job, (err as Error).message, { retryable: true });
+    if (outcome === "failed") await giveUp(db, job.payload.proposalId);
   }
 }

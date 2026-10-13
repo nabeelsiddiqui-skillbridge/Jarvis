@@ -351,3 +351,67 @@ Status of each stage of the build plan: what works, what is simulated, and what 
 - Optional `SMTP_URL` and `EMAIL_FROM` for email delivery.
 - `ANTHROPIC_API_KEY` for AI explanations, summaries and commentary. Every finding and figure works without it.
 - The worker process must be running for schedules, detection after syncs and retries.
+
+## Stage 8 — Approved external actions ✅
+
+**Works**
+- **Supported actions** are declared by each connector (`actionDefs`). Only those are offered, and only for connections that are active, not the demo, and granted the scopes the action needs.
+  - **Google Ads**:
+    - pause or enable a campaign (medium risk);
+    - change a campaign's daily budget. Shared budgets are refused, as are increases over 10×. Increases over 50% are high risk.
+  - **HubSpot**: move an open deal to another stage. This needs `HUBSPOT_ENABLE_ACTIONS=true` and a reconnection that grants `crm.objects.deals.write`; until then the UI explains why it's unavailable.
+- **Proposals** come from the Actions tab (`/automations?tab=actions`) or from the assistant (`propose_action`). The assistant can only propose; it never executes.
+- Preparing a proposal reads the **live current value** from the account, then (Google Ads) runs a validate-only dry run. The review card shows:
+  - business, provider, connection and account;
+  - the affected campaign or deal;
+  - current → proposed values;
+  - expected effect (pausing includes the last 7 days of synced spend);
+  - risk, and the approval requirement.
+- **Approval is bound to the exact payload**. The approver submits the sha256 fingerprint of the canonical payload they reviewed, and the server rejects a mismatch (409). Changing anything means a new proposal, which supersedes the older pending ones. Proposals expire after 24h.
+- **Backend re-validation**: approve and reject need `action.approve` (owner or admin). High-risk changes need a different administrator than the proposer when one exists. At execution the worker re-checks:
+  - the approval, the payload hash, that the approver is still an admin, and the connection status and scopes;
+  - then the **current value in the provider**:
+    - already equal to the proposed value → recorded as done, without writing;
+    - changed since the proposal → fails with "changed since it was proposed" (no blind overwrite).
+- **No duplicate execution**:
+  - one approval per proposal (unique);
+  - an idempotency key per proposal;
+  - an atomic claim with a row lock;
+  - one queued job per action.
+  A double approve gets 409.
+- **Timeouts and 5xx** mark the action `needs_check`. The retry **reads the provider status first** and only writes if the change didn't land.
+- **Records**: every attempt (phase, request summary, provider response, error, duration), the final provider response, and the audit trail (`action.proposed` / `approved` / `executed` / `failed` / `cancelled`). Proposers and approvers are notified of the result; approvers are notified of new proposals. A live SSE event refreshes open screens.
+- **UI**:
+  - an Actions tab with "Waiting for approval" and "History";
+  - a "New action" dialog with live campaign/deal lists and parameter fields;
+  - review-and-approve confirmation with an optional comment;
+  - Reject / Cancel;
+  - an execution log and the fingerprint.
+  Action cards also appear inline in assistant answers. Works at 390px.
+
+**Verified**
+- `apps/server/test/actions.test.ts` (15 tests, against the Google Ads and HubSpot stand-ins):
+  - proposal with dry run, and the no-change refusal;
+  - wrong hash 409; analyst can't approve; a second approval gets 409;
+  - exactly one provider write, with an attempt log and audit sequence;
+  - supersede;
+  - **applied-then-503** resolved by the status check without a second write;
+  - 503 before applying → retried once;
+  - drift → failed without writing;
+  - high-risk two-person rule and the 10× guardrail;
+  - approver demoted before execution → failed;
+  - provider 400 recorded; expiry;
+  - HubSpot deal move;
+  - read-only HubSpot shows the reason;
+  - cross-business access → 404;
+  - the assistant proposes but never executes, and viewers can't propose.
+- Full suite: 87 server + 12 shared tests pass.
+- Browser walkthrough (desktop and 390px): connect Google Ads → Actions → New action → pause "Brand Search" (current Enabled → Paused, $595 7-day spend shown) → review and approve → Done in History, notification received.
+
+**Simulated / not verified live**
+- Google Ads mutations and HubSpot deal updates were exercised against local stand-ins that mirror the documented request/response shapes, not against real accounts.
+
+**External setup**
+- Google Ads: the existing `adwords` scope already allows changes, but the developer token needs Basic or Standard access to modify non-test accounts.
+- HubSpot: add `crm.objects.deals.write` to the app's optional scopes, set `HUBSPOT_ENABLE_ACTIONS=true`, and have users reconnect.
+- The worker process must be running for approved actions to execute.

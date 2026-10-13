@@ -86,6 +86,7 @@ export function useBusinessEvents(businessId: string) {
     });
     es.addEventListener("insight_created", () => qc.invalidateQueries({ queryKey: ["b", businessId, "insights"] }));
     es.addEventListener("report_created", () => qc.invalidateQueries({ queryKey: ["b", businessId, "reports"] }));
+    es.addEventListener("actions_updated", () => qc.invalidateQueries({ queryKey: ["b", businessId, "actions"] }));
     es.addEventListener("tasks_updated", () => qc.invalidateQueries({ queryKey: ["b", businessId, "tasks"] }));
     es.addEventListener("notification", () => qc.invalidateQueries({ queryKey: ["notifications"] }));
     return () => es.close();

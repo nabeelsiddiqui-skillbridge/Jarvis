@@ -56,6 +56,13 @@ assistantRouter.get("/businesses/:businessId/assistant/conversations/:conversati
     if (!conv) throw notFound("Conversation");
     const rows = (await db.query(`SELECT display FROM conversation_messages WHERE conversation_id = $1 ORDER BY seq`, [conv.id])).rows;
     const messages = rows.map((r) => r.display as DisplayMessage);
+    // Action status changes after the message was written (approved, done…): refresh it.
+    const actionIds = messages.flatMap((m) => (m.actions ?? []).map((a) => a.id));
+    if (actionIds.length) {
+      const { loadProposals } = await import("../actions/engine.js");
+      const fresh = new Map((await loadProposals(db, business.id, "p.id = ANY($2::uuid[])", [actionIds])).map((a) => [a.id, a]));
+      for (const m of messages) m.actions = (m.actions ?? []).map((a) => fresh.get(a.id) ?? a);
+    }
     // Proposal status changes after the message was written (applied, undone…): refresh it.
     const ids = messages.flatMap((m) => m.proposals.map((p) => p.id));
     if (ids.length) {

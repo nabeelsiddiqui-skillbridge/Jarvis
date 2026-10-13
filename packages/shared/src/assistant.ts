@@ -1,4 +1,5 @@
 import type { QueryResult, SourceInfo } from "./widgets.js";
+import type { ActionProposal } from "./actions.js";
 
 /**
  * Assistant wire types. Evidence is built by the server from the exact query
@@ -46,6 +47,7 @@ export interface AssistantStep {
   label: string;
   evidenceId?: string;
   proposalId?: string;
+  actionId?: string;
   error?: string;
 }
 
@@ -68,6 +70,8 @@ export interface DisplayMessage {
   steps: AssistantStep[];
   evidence: Evidence[];
   proposals: ProposalSummary[];
+  /** External actions the assistant proposed (always pending approval). */
+  actions?: ActionProposal[];
   createdAt: string;
 }
 
@@ -85,5 +89,6 @@ export type AssistantStreamEvent =
   | { type: "step"; step: AssistantStep; done: boolean }
   | { type: "evidence"; evidence: Evidence }
   | { type: "proposal"; proposal: ProposalSummary }
+  | { type: "action"; action: ActionProposal }
   | { type: "done"; message: DisplayMessage }
   | { type: "error"; message: string };

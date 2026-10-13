@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowUp, Bot, CheckCircle2, Loader2, Mic, Square, XCircle } from "lucide-react";
-import type { AssistantStep, Business, DisplayMessage, Evidence, ProposalSummary } from "@bca/shared";
+import type { ActionProposal, AssistantStep, Business, DisplayMessage, Evidence, ProposalSummary } from "@bca/shared";
 import { cn } from "@/lib/cn";
 import { errorMessage, post } from "@/lib/api";
 import { assistantKeys, streamMessage, useAssistantStatus, useConversation, type ConversationDetail } from "@/lib/assistant";
 import { Prerequisite } from "@/components/ui/EmptyState";
 import { Spinner } from "@/components/ui/Spinner";
+import { ActionCard } from "@/components/actions/ActionCard";
+import { useMe } from "@/lib/session";
 import { CitationChip, EvidenceCard, EvidenceNote } from "./Evidence";
 import { Markdown } from "./Markdown";
 import { ProposalCard } from "./Proposal";
@@ -18,6 +20,7 @@ interface Pending {
   steps: (AssistantStep & { done: boolean })[];
   evidence: Evidence[];
   proposals: ProposalSummary[];
+  actions: ActionProposal[];
 }
 
 const SUGGESTIONS = [
@@ -87,7 +90,7 @@ export function Chat({ business, conversationId, onConversation, onMissing, comp
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     const now = new Date().toISOString();
-    setPending({ user: { id: "pending", role: "user", status: "complete", text, steps: [], evidence: [], proposals: [], createdAt: now }, text: "", steps: [], evidence: [], proposals: [] });
+    setPending({ user: { id: "pending", role: "user", status: "complete", text, steps: [], evidence: [], proposals: [], createdAt: now }, text: "", steps: [], evidence: [], proposals: [], actions: [] });
     const key = assistantKeys.conversation(business.id, id);
     try {
       await streamMessage(business.id, id, text, (e) => {
@@ -96,6 +99,7 @@ export function Chat({ business, conversationId, onConversation, onMissing, comp
         else if (e.type === "step") { setPending((p) => p && { ...p, steps: [...p.steps.filter((s) => s.id !== e.step.id), { ...e.step, done: e.done }] }); if (opts.voice) voice.step(!e.done); }
         else if (e.type === "evidence") setPending((p) => p && { ...p, evidence: [...p.evidence, e.evidence] });
         else if (e.type === "proposal") setPending((p) => p && { ...p, proposals: [...p.proposals, e.proposal] });
+        else if (e.type === "action") setPending((p) => p && { ...p, actions: [...p.actions, e.action] });
         else if (e.type === "error") setError(e.message);
         else if (e.type === "done") {
           setPending((p) => {
@@ -151,7 +155,7 @@ export function Chat({ business, conversationId, onConversation, onMissing, comp
           {pending && (
             <>
               <MessageView m={pending.user} business={business} lookup={lookup} />
-              <MessageView business={business} streaming m={{ id: "streaming", role: "assistant", status: "complete", text: pending.text, steps: pending.steps, evidence: pending.evidence, proposals: pending.proposals, createdAt: "" }} liveSteps={pending.steps} lookup={lookup} />
+              <MessageView business={business} streaming m={{ id: "streaming", role: "assistant", status: "complete", text: pending.text, steps: pending.steps, evidence: pending.evidence, proposals: pending.proposals, actions: pending.actions, createdAt: "" }} liveSteps={pending.steps} lookup={lookup} />
             </>
           )}
           {error && (
@@ -169,6 +173,7 @@ export function Chat({ business, conversationId, onConversation, onMissing, comp
 
 function MessageView({ m, business, streaming, liveSteps, lookup }: { m: DisplayMessage; business: Business; streaming?: boolean; liveSteps?: (AssistantStep & { done: boolean })[]; lookup: Map<string, Evidence> }) {
   const [open, setOpen] = useState<string | null>(null);
+  const me = useMe();
   if (m.role === "user") {
     return <div className="ml-auto max-w-[88%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-accent/15 px-3.5 py-2 text-sm text-fg">{m.text}</div>;
   }
@@ -200,6 +205,7 @@ function MessageView({ m, business, streaming, liveSteps, lookup }: { m: Display
           <p className="text-xs text-warning">{m.status === "refused" ? "The AI provider declined this request." : m.status === "truncated" ? "This answer was cut short." : "This answer didn't complete."}</p>
         )}
         {m.proposals.map((p) => <ProposalCard key={p.id} business={business} proposal={p} />)}
+        {m.actions?.map((a) => <ActionCard key={a.id} business={business} action={a} me={me.data?.user.id ?? ""} compact />)}
         {open && <EvidencePanel evidence={lookup.get(open)} open={open} />}
         {!streaming && m.evidence.length > 0 && !open && (
           <div className="flex flex-wrap items-center gap-1 text-xs text-subtle">

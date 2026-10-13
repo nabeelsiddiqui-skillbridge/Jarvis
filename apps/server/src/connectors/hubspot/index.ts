@@ -4,7 +4,8 @@ import { config } from "../../config.js";
 import { safeEqual } from "../../lib/crypto.js";
 import { ProviderError, providerFetch, providerUrl } from "../http.js";
 import { datesBetween, localDate, replaceFacts, updateAssetCursor, upsertSourceRecords, type FactInput } from "../normalize.js";
-import type { ConnectorDefinition, Credentials, SyncContext, SyncResult, VerifiedWebhook } from "../types.js";
+import type { ActionTarget } from "@bca/shared";
+import type { ActionDefinition, ConnectorDefinition, Credentials, SyncContext, SyncResult, VerifiedWebhook } from "../types.js";
 
 /**
  * HubSpot CRM. OAuth 2.0 (30-minute access tokens, long-lived refresh token).
@@ -19,7 +20,10 @@ import type { ConnectorDefinition, Credentials, SyncContext, SyncResult, Verifie
  */
 const H = (url: string) => providerUrl(url, "HUBSPOT_BASE_URL_OVERRIDE");
 const API = (path: string) => H(`https://api.hubapi.com/${path}`);
-const SCOPES = ["oauth", "crm.objects.contacts.read", "crm.objects.deals.read"];
+const READ_SCOPES = ["oauth", "crm.objects.contacts.read", "crm.objects.deals.read"];
+const WRITE_SCOPE = "crm.objects.deals.write";
+/** Write access is requested only when the operator enables actions (minimum scopes otherwise). */
+const scopes = () => (process.env.HUBSPOT_ENABLE_ACTIONS === "true" ? [...READ_SCOPES, WRITE_SCOPE] : READ_SCOPES);
 const FLOW = ["crm_new_contacts", "crm_qualified_leads", "crm_deals_created", "crm_deals_won", "crm_deals_lost", "crm_won_value"];
 const SNAPSHOT = ["crm_open_deals", "crm_open_pipeline"];
 /** HubSpot search returns at most 10k results per query (adjustable for tests). */
@@ -331,6 +335,70 @@ async function handleWebhook(ctx: SyncContext, hook: VerifiedWebhook) {
   return { datesRecomputed: n };
 }
 
+// ------------------------------------------------------------------ actions
+
+async function readDeal(creds: Credentials, id: string) {
+  if (!/^\d+$/.test(id)) throw new ProviderError("permanent", "Unknown deal.");
+  const { data } = await providerFetch(API(`crm/v3/objects/deals/${id}?properties=dealname,dealstage,pipeline,amount_in_home_currency`), { provider: "HubSpot", headers: auth(creds) });
+  return data as { id: string; properties: Record<string, string | null> };
+}
+
+const moveDeal: ActionDefinition = {
+  type: "hubspot.deal.set_stage",
+  label: "Move a deal to another stage",
+  description: "Change the pipeline stage of an open HubSpot deal (for example to closed-won).",
+  targetKind: "deal",
+  requiredScopes: [WRITE_SCOPE],
+  async listTargets(ctx) {
+    const creds = await ctx.credentials();
+    const labels = await pipelines(creds);
+    const { data } = await providerFetch(API("crm/v3/objects/deals/search"), {
+      provider: "HubSpot", method: "POST", idempotent: true, headers: auth(creds),
+      json: { filterGroups: [{ filters: [{ propertyName: "hs_is_closed", operator: "EQ", value: "false" }] }], sorts: [{ propertyName: "hs_lastmodifieddate", direction: "DESCENDING" }], properties: ["dealname", "dealstage", "pipeline", "amount_in_home_currency"], limit: 100 },
+    });
+    return (data.results ?? []).map((d: any): ActionTarget => {
+      const p = labels[d.properties.pipeline];
+      return {
+        id: String(d.id), name: d.properties.dealname || `Deal ${d.id}`, kind: "deal", assetId: ctx.asset?.id ?? null, assetName: ctx.asset?.name ?? null,
+        state: { stage: d.properties.dealstage, pipeline: d.properties.pipeline },
+        summary: `${p?.label ?? "Pipeline"} · ${p?.stages[d.properties.dealstage] ?? d.properties.dealstage}${d.properties.amount_in_home_currency ? ` · ${Number(d.properties.amount_in_home_currency).toLocaleString()}` : ""}`,
+        fields: [{ key: "stage", label: "New stage", kind: "select", options: Object.entries(p?.stages ?? {}).filter(([id]) => id !== d.properties.dealstage).map(([value, label]) => ({ value, label })) }],
+      };
+    });
+  },
+  async prepare(ctx, targetId, params) {
+    const creds = await ctx.credentials();
+    const deal = await readDeal(creds, targetId);
+    const labels = await pipelines(creds);
+    const pipe = labels[deal.properties.pipeline ?? ""];
+    const stage = String(params.stage ?? "");
+    if (!pipe || !pipe.stages[stage]) throw new ProviderError("permanent", "Choose a stage from the deal's own pipeline.");
+    if (deal.properties.dealstage === stage) throw new ProviderError("permanent", "The deal is already in that stage.");
+    const to = pipe.stages[stage]!;
+    const from = pipe.stages[deal.properties.dealstage ?? ""] ?? deal.properties.dealstage ?? "unknown";
+    const closing = /won|lost|closed/i.test(to);
+    return {
+      target: { kind: "deal", id: String(deal.id), name: deal.properties.dealname || `Deal ${deal.id}` },
+      assetId: ctx.asset?.id ?? null,
+      params: { stage },
+      current: { stage: deal.properties.dealstage },
+      proposed: { stage },
+      changes: [{ label: "Deal stage", current: `${from} (${pipe.label})`, proposed: `${to} (${pipe.label})` }],
+      expectedEffect: `"${deal.properties.dealname}" moves from ${from} to ${to} in HubSpot${closing ? `. Closing stages change won/lost counts, won value and win rate from the next sync${/won/i.test(to) ? ", and HubSpot may trigger its own workflows for won deals" : ""}.` : "."}`,
+      risk: closing ? "medium" : "low",
+    };
+  },
+  async readState(ctx, payload) {
+    const deal = await readDeal(await ctx.credentials(), payload.target.id);
+    return { stage: deal.properties.dealstage };
+  },
+  async execute(ctx, payload) {
+    const creds = await ctx.credentials();
+    const { data } = await providerFetch(API(`crm/v3/objects/deals/${payload.target.id}`), { provider: "HubSpot", method: "PATCH", retries: 0, headers: auth(creds), json: { properties: { dealstage: payload.params.stage } } });
+    return { response: { id: data?.id, dealstage: data?.properties?.dealstage, updatedAt: data?.updatedAt } };
+  },
+};
+
 // ------------------------------------------------------------------ definition
 
 export const hubspot: ConnectorDefinition = {
@@ -348,9 +416,11 @@ export const hubspot: ConnectorDefinition = {
     { scope: "crm.objects.contacts.read", reason: "Contact creation dates, lifecycle stage and original source (no names or emails are stored)" },
     { scope: "crm.objects.deals.read", reason: "Deal stages, pipelines, amounts and close dates" },
     { scope: "oauth", reason: "Identify the HubSpot account" },
+    { scope: "crm.objects.deals.write", reason: "Only when actions are enabled: move deals between stages after an administrator approves", optional: true },
   ],
   metrics: [...FLOW, ...SNAPSHOT],
-  actions: [],
+  actions: ["Move a deal to another stage (needs HUBSPOT_ENABLE_ACTIONS and reconnection)"],
+  actionDefs: [moveDeal],
   supportsWebhooks: true,
   reportingDelay: "Changes appear within minutes (webhooks) or at the next hourly sync",
   staleAfterHours: 6,
@@ -358,7 +428,7 @@ export const hubspot: ConnectorDefinition = {
   reconcileDays: 30,
   docsUrl: "https://developers.hubspot.com/docs/api/oauth-quickstart-guide",
   authorizeUrl({ state, redirectUri }) {
-    const q = new URLSearchParams({ client_id: process.env.HUBSPOT_CLIENT_ID!, redirect_uri: redirectUri, scope: SCOPES.join(" "), state });
+    const q = new URLSearchParams({ client_id: process.env.HUBSPOT_CLIENT_ID!, redirect_uri: redirectUri, scope: scopes().join(" "), state });
     return `${H("https://app.hubspot.com/oauth/authorize")}?${q}`;
   },
   async handleCallback({ query, redirectUri }) {
@@ -368,7 +438,7 @@ export const hubspot: ConnectorDefinition = {
     const info = await accountInfo(creds);
     return {
       credentials: creds,
-      scopes: SCOPES,
+      scopes: scopes(),
       externalAccountId: String(info.portalId),
       displayName: `HubSpot account #${info.portalId}`,
       tokenExpiresAt: new Date(Date.now() + t.expires_in * 1000),

@@ -1,7 +1,8 @@
 import { addDays } from "@bca/shared";
 import { ProviderError, providerFetch } from "../http.js";
 import { syncReport, type ReportRow } from "../report.js";
-import type { AssetInfo, ConnectorDefinition, Credentials, SyncContext } from "../types.js";
+import { formatMetricValue, type ActionTarget } from "@bca/shared";
+import type { ActionContext, ActionDefinition, ActionPayload, AssetInfo, ConnectorDefinition, Credentials, SyncContext } from "../types.js";
 import { G, googleAuthorizeUrl, googleCallback, googleNeedsRefresh, googleRefresh, googleRevoke } from "./oauth.js";
 
 /**
@@ -143,6 +144,150 @@ async function listAccounts(creds: Credentials): Promise<AssetInfo[]> {
   return [...assets.values()];
 }
 
+// ------------------------------------------------------------------ actions
+
+async function mutate(customerId: string, creds: Credentials, login: string | null, resource: "campaigns" | "campaignBudgets", operation: unknown, validateOnly: boolean) {
+  try {
+    const { data } = await providerFetch(API(`customers/${customerId}/${resource}:mutate`), {
+      provider: "Google Ads", method: "POST", retries: 0, timeoutMs: 30_000,
+      headers: headers(creds, login), json: { operations: [operation], partialFailure: false, validateOnly },
+    });
+    return data;
+  } catch (e) {
+    explain(e);
+  }
+}
+
+interface Campaign { customerId: string; id: string; name: string; status: string; budgetResource: string; budgetMicros: number; sharedBudget: boolean; currency: string | null; assetId: string; assetName: string; login: string | null }
+
+async function campaigns(ctx: ActionContext, onlyCustomer?: string, onlyCampaign?: string): Promise<Campaign[]> {
+  const creds = await ctx.credentials();
+  const out: Campaign[] = [];
+  for (const a of ctx.assets.filter((x) => !onlyCustomer || x.provider_asset_id === onlyCustomer)) {
+    const login = (a.metadata?.loginCustomerId as string | undefined) ?? null;
+    const rows = await search(a.provider_asset_id, creds, login,
+      `SELECT campaign.id, campaign.name, campaign.status, campaign.campaign_budget, campaign_budget.amount_micros, campaign_budget.explicitly_shared
+         FROM campaign WHERE campaign.status != 'REMOVED'${onlyCampaign ? ` AND campaign.id = ${Number(onlyCampaign)}` : ""} ORDER BY campaign.name LIMIT 200`);
+    for (const r of rows) {
+      out.push({ customerId: a.provider_asset_id, id: String(r.campaign?.id), name: r.campaign?.name ?? `Campaign ${r.campaign?.id}`, status: r.campaign?.status, budgetResource: r.campaign?.campaignBudget, budgetMicros: Number(r.campaignBudget?.amountMicros ?? 0), sharedBudget: Boolean(r.campaignBudget?.explicitlySharedBudget ?? r.campaignBudget?.explicitlyShared), currency: a.currency, assetId: a.id, assetName: a.name, login });
+    }
+  }
+  return out;
+}
+
+async function oneCampaign(ctx: ActionContext, targetId: string) {
+  const [customerId, campaignId] = targetId.split(":");
+  if (!customerId || !campaignId || !/^\d+$/.test(customerId) || !/^\d+$/.test(campaignId)) throw new ProviderError("permanent", "Unknown campaign.");
+  const c = (await campaigns(ctx, customerId, campaignId))[0];
+  if (!c) throw new ProviderError("not_found", "That campaign wasn't found in the connected Google Ads accounts.");
+  return c;
+}
+
+async function recentSpend(ctx: ActionContext, assetId: string, campaignName: string) {
+  const r = await ctx.db.query(
+    `SELECT sum(value)::float8 AS v FROM metric_facts WHERE asset_id = $1 AND metric_key = 'ad_spend' AND dim_key = 'campaign' AND dim_value = $2 AND date >= current_date - 7`,
+    [assetId, campaignName],
+  );
+  return r.rows[0]?.v as number | null;
+}
+
+const money = (v: number, cur: string | null) => formatMetricValue(v, "currency", cur ?? "USD");
+const STATUS_LABEL: Record<string, string> = { ENABLED: "Enabled", PAUSED: "Paused" };
+
+const toTarget = (c: Campaign, fields: ActionTarget["fields"]): ActionTarget => ({
+  id: `${c.customerId}:${c.id}`, name: c.name, kind: "campaign", assetId: c.assetId, assetName: c.assetName,
+  state: { status: c.status, dailyBudget: c.budgetMicros / 1e6, sharedBudget: c.sharedBudget },
+  summary: `${STATUS_LABEL[c.status] ?? c.status} · ${money(c.budgetMicros / 1e6, c.currency)}/day${c.sharedBudget ? " (shared budget)" : ""}`,
+  fields,
+});
+
+const setStatus: ActionDefinition = {
+  type: "google_ads.campaign.set_status",
+  label: "Pause or enable a campaign",
+  description: "Pause a Google Ads campaign so its ads stop serving, or enable a paused one.",
+  targetKind: "campaign",
+  requiredScopes: [SCOPE],
+  async listTargets(ctx) {
+    return (await campaigns(ctx)).map((c) => toTarget(c, [{ key: "status", label: "New status", kind: "select", options: [{ value: "PAUSED", label: "Paused" }, { value: "ENABLED", label: "Enabled" }] }]));
+  },
+  async prepare(ctx, targetId, params) {
+    const status = params.status === "PAUSED" || params.status === "ENABLED" ? params.status : null;
+    if (!status) throw new ProviderError("permanent", "Choose Paused or Enabled.");
+    const c = await oneCampaign(ctx, targetId);
+    if (c.status === status) throw new ProviderError("permanent", `The campaign is already ${STATUS_LABEL[status]!.toLowerCase()}.`);
+    const creds = await ctx.credentials();
+    // Ask Google Ads to validate the exact change without applying it.
+    await mutate(c.customerId, creds, c.login, "campaigns", { update: { resourceName: `customers/${c.customerId}/campaigns/${c.id}`, status }, updateMask: "status" }, true);
+    const spend = await recentSpend(ctx, c.assetId, c.name);
+    return {
+      target: { kind: "campaign", id: `${c.customerId}:${c.id}`, name: c.name },
+      assetId: c.assetId,
+      params: { status },
+      current: { status: c.status },
+      proposed: { status },
+      changes: [{ label: "Status", current: STATUS_LABEL[c.status] ?? c.status, proposed: STATUS_LABEL[status]! }],
+      expectedEffect: status === "PAUSED"
+        ? `Ads in "${c.name}" stop serving until the campaign is enabled again.${spend != null ? ` It spent ${money(spend, c.currency)} over the last 7 days of synced data; that spend — and the clicks and conversions it brought — would stop.` : ""}`
+        : `Ads in "${c.name}" can start serving again within its ${money(c.budgetMicros / 1e6, c.currency)} daily budget.`,
+      risk: "medium",
+    };
+  },
+  async readState(ctx, payload) {
+    const c = await oneCampaign(ctx, payload.target.id);
+    return { status: c.status };
+  },
+  async execute(ctx, payload) {
+    const c = await oneCampaign(ctx, payload.target.id);
+    const creds = await ctx.credentials();
+    const response = await mutate(c.customerId, creds, c.login, "campaigns", { update: { resourceName: `customers/${c.customerId}/campaigns/${c.id}`, status: payload.params.status }, updateMask: "status" }, false);
+    return { response };
+  },
+};
+
+const setBudget: ActionDefinition = {
+  type: "google_ads.campaign.set_budget",
+  label: "Change a campaign's daily budget",
+  description: "Set the average daily budget of a Google Ads campaign (campaigns with a shared budget aren't supported).",
+  targetKind: "campaign",
+  requiredScopes: [SCOPE],
+  async listTargets(ctx) {
+    return (await campaigns(ctx)).filter((c) => !c.sharedBudget).map((c) => toTarget(c, [{ key: "dailyBudget", label: `New daily budget (${c.currency ?? ""})`, kind: "money", help: "Average daily spend; Google Ads may spend up to twice this on some days." }]));
+  },
+  async prepare(ctx, targetId, params) {
+    const amount = Math.round(Number(params.dailyBudget) * 100) / 100;
+    if (!Number.isFinite(amount) || amount < 1) throw new ProviderError("permanent", "Enter a daily budget of at least 1.");
+    const c = await oneCampaign(ctx, targetId);
+    if (c.sharedBudget) throw new ProviderError("permanent", "This campaign uses a shared budget that affects other campaigns; change it in Google Ads.");
+    const current = c.budgetMicros / 1e6;
+    if (Math.abs(current - amount) < 0.005) throw new ProviderError("permanent", "That's already the campaign's daily budget.");
+    if (amount > current * 10 && current > 0) throw new ProviderError("permanent", "That's more than ten times the current budget. Make large increases in steps.");
+    const creds = await ctx.credentials();
+    await mutate(c.customerId, creds, c.login, "campaignBudgets", { update: { resourceName: c.budgetResource, amountMicros: String(Math.round(amount * 1e6)) }, updateMask: "amount_micros" }, true);
+    const pct = current ? ((amount - current) / current) * 100 : 100;
+    return {
+      target: { kind: "campaign", id: `${c.customerId}:${c.id}`, name: c.name },
+      assetId: c.assetId,
+      params: { dailyBudget: amount },
+      current: { dailyBudgetMicros: c.budgetMicros },
+      proposed: { dailyBudgetMicros: Math.round(amount * 1e6) },
+      changes: [{ label: "Daily budget", current: money(current, c.currency), proposed: money(amount, c.currency) }],
+      expectedEffect: `Average daily spend for "${c.name}" can ${amount > current ? "rise" : "fall"} by up to ${money(Math.abs(amount - current), c.currency)} (${pct >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(0)}%), about ${money(Math.abs(amount - current) * 30.4, c.currency)} a month. Results depend on demand and bidding; Google Ads may spend up to twice the daily amount on individual days.`,
+      risk: pct > 50 ? "high" : pct > 0 ? "medium" : "low",
+    };
+  },
+  async readState(ctx, payload) {
+    const c = await oneCampaign(ctx, payload.target.id);
+    return { dailyBudgetMicros: c.budgetMicros };
+  },
+  async execute(ctx, payload) {
+    const c = await oneCampaign(ctx, payload.target.id);
+    if (c.sharedBudget) throw new ProviderError("permanent", "The campaign now uses a shared budget; the change wasn't made.");
+    const creds = await ctx.credentials();
+    const response = await mutate(c.customerId, creds, c.login, "campaignBudgets", { update: { resourceName: c.budgetResource, amountMicros: String(Math.round(Number(payload.params.dailyBudget) * 1e6)) }, updateMask: "amount_micros" }, false);
+    return { response };
+  },
+};
+
 export const googleAds: ConnectorDefinition = {
   id: "google_ads",
   name: "Google Ads",
@@ -154,9 +299,10 @@ export const googleAds: ConnectorDefinition = {
     "A Google Ads developer token (from a manager account's API Center) with Basic or Standard access approved by Google — test-level tokens only reach test accounts.",
     "The Google Ads API enabled on the Google Cloud project, and redirect URI <API_URL>/api/oauth/google_ads/callback on the OAuth client.",
   ],
-  scopes: [{ scope: SCOPE, reason: "Read Google Ads accounts and performance reports (this platform never edits campaigns without an approved action)" }],
+  scopes: [{ scope: SCOPE, reason: "Read accounts and performance; campaign changes happen only through actions an administrator approves" }],
   metrics: OWNED,
-  actions: [],
+  actions: ["Pause or enable a campaign", "Change a campaign's daily budget"],
+  actionDefs: [setStatus, setBudget],
   supportsWebhooks: false,
   reportingDelay: "Spend updates within ~3 hours; conversions can change for up to 30 days",
   staleAfterHours: 12,

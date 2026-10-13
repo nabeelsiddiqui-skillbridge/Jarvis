@@ -18,6 +18,8 @@ import { Skeleton } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
 import { relativeTime } from "@/components/widgets/WidgetFrame";
 import { MetricSelect } from "@/components/dashboard/pickers";
+import { Tabs } from "@/components/ui/Tabs";
+import { ActionsPanel } from "@/components/actions/ActionsPanel";
 
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const RUN_TONE: Record<AutomationRun["status"], "neutral" | "accent" | "success" | "danger" | "warning" | "violet"> = {
@@ -48,6 +50,7 @@ export function Automations() {
   const [editing, setEditing] = useState<{ open: boolean; automation: Automation | null; kind: AutomationKind | null }>({ open: false, automation: null, kind: null });
   const [historyFor, setHistoryFor] = useState<Automation | null>(null);
   const runParam = params.get("run");
+  const tab = params.get("tab") === "actions" ? "actions" : "automations";
   const write = can(b.role, "automation.write");
   const qc = useQueryClient();
   const toast = useToast();
@@ -66,9 +69,13 @@ export function Automations() {
 
   return (
     <>
-      <PageHeader title="Automations" description={`Scheduled briefings and reports, alerts and task creation for ${b.name}. Every run is recorded; duplicates are prevented.`}
-        actions={write && <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setEditing({ open: true, automation: null, kind: null })}>New automation</Button>} />
-      {list.isLoading ? <div className="space-y-3">{[0, 1].map((i) => <Skeleton key={i} className="h-28" />)}</div>
+      <PageHeader title="Automations" description={tab === "actions" ? `Proposed changes to ${b.name}'s connected accounts. Nothing changes until an owner or administrator approves the exact change.` : `Scheduled briefings and reports, alerts and task creation for ${b.name}. Every run is recorded; duplicates are prevented.`}
+        actions={<div className="flex flex-wrap items-center gap-2">
+          <Tabs value={tab} onChange={(v) => setParams(v === "actions" ? { tab: "actions" } : {})} items={[{ value: "automations", label: "Automations" }, { value: "actions", label: "Actions" }]} />
+          {write && tab === "automations" && <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setEditing({ open: true, automation: null, kind: null })}>New automation</Button>}
+        </div>} />
+      {tab === "actions" ? <ActionsPanel focus={params.get("action")} />
+        : list.isLoading ? <div className="space-y-3">{[0, 1].map((i) => <Skeleton key={i} className="h-28" />)}</div>
         : list.error ? <ErrorState error={list.error} onRetry={() => list.refetch()} />
         : (
           <div className="space-y-6">

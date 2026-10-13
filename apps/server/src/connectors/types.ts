@@ -71,6 +71,53 @@ export interface CallbackResult {
   settings?: Record<string, unknown>;
 }
 
+/** Context for provider actions: credentials are fetched (and refreshed) on demand. */
+export interface ActionContext {
+  db: import("pg").PoolClient;
+  connection: ConnectionRow;
+  asset: AssetRow | null;
+  assets: AssetRow[];
+  credentials(): Promise<Credentials>;
+}
+
+export interface PreparedAction {
+  target: { kind: string; id: string; name: string };
+  /** The asset (account) the target belongs to. */
+  assetId: string | null;
+  params: Record<string, unknown>;
+  current: Record<string, unknown>;
+  proposed: Record<string, unknown>;
+  changes: { label: string; current: string; proposed: string }[];
+  expectedEffect: string;
+  risk: "low" | "medium" | "high";
+}
+
+export interface ActionPayload {
+  type: string;
+  connectionId: string;
+  assetId: string | null;
+  target: { kind: string; id: string; name: string };
+  params: Record<string, unknown>;
+}
+
+/**
+ * A provider operation the platform can perform after approval. `prepare` reads
+ * live state (and validates with the provider where possible) without changing
+ * anything; `readState` re-reads the same fields so the executor can detect drift
+ * and confirm whether an ambiguous attempt was applied before retrying.
+ */
+export interface ActionDefinition {
+  type: string;
+  label: string;
+  description: string;
+  targetKind: string;
+  requiredScopes: string[];
+  listTargets(ctx: ActionContext): Promise<import("@bca/shared").ActionTarget[]>;
+  prepare(ctx: ActionContext, targetId: string, params: Record<string, unknown>): Promise<PreparedAction>;
+  readState(ctx: ActionContext, payload: ActionPayload): Promise<Record<string, unknown>>;
+  execute(ctx: ActionContext, payload: ActionPayload): Promise<{ response: unknown }>;
+}
+
 export interface VerifiedWebhook {
   deliveryId: string;
   topic: string;
@@ -118,5 +165,7 @@ export interface ConnectorDefinition {
   handleWebhook?(ctx: SyncContext, hook: VerifiedWebhook): Promise<{ datesRecomputed: number }>;
   registerWebhooks?(ctx: SyncContext, callbackUrl: string): Promise<string[]>;
   healthCheck?(ctx: SyncContext): Promise<void>;
+  /** Supported provider actions (only these are ever offered). */
+  actionDefs?: ActionDefinition[];
   revoke?(creds: Credentials, connection: ConnectionRow): Promise<void>;
 }
