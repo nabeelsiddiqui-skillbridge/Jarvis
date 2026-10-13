@@ -206,16 +206,15 @@ describe("AI assistant (against a scripted Messages API stand-in)", () => {
   });
 
   it("explains the prerequisite when no AI provider is configured", async () => {
-    const { config } = await import("../src/config.js");
-    const key = config.anthropic.apiKey;
-    config.anthropic.apiKey = undefined;
+    const key = process.env.ANTHROPIC_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
     try {
       expect((await owner.get(`/api/businesses/${businessId}/assistant/status`)).body.configured).toBe(false);
       const r = await ask(owner, businessId, conversationId, "sales?");
       expect(r.status).toBe(412);
       expect(r.body.error.message).toMatch(/ANTHROPIC_API_KEY/);
     } finally {
-      config.anthropic.apiKey = key;
+      process.env.ANTHROPIC_API_KEY = key;
     }
   });
 });

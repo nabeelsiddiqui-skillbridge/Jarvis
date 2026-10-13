@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { Card, PageHeader } from "@/components/ui/Card";
 import { Field, Input } from "@/components/ui/Field";
 import { useToast } from "@/components/ui/Toast";
+import { VoicePicker } from "@/components/assistant/VoicePicker";
 
 export function Account() {
   const me = useMe();
@@ -30,6 +31,9 @@ export function Account() {
             <Field label="Name">{(p) => <Input {...p} value={name} onChange={(e) => setName(e.target.value)} />}</Field>
             <div className="flex justify-end"><Button type="submit" variant="primary">Save</Button></div>
           </form>
+        </Card>
+        <Card title="JARVIS voice" description="The voice used when JARVIS answers out loud. Voices come from ElevenLabs; your choice is personal to you." className="xl:col-span-2">
+          <VoicePicker />
         </Card>
         <Card title="Password" description="Changing it signs you out on every other device.">
           <form className="space-y-4" onSubmit={async (e) => {

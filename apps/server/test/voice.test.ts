@@ -60,8 +60,7 @@ describe("voice", () => {
   });
 
   it("mints a short-lived token for the browser and never exposes the API key", async () => {
-    const { config } = await import("../src/config.js");
-    config.voice.deepgramKey = DG_KEY;
+    process.env.DEEPGRAM_API_KEY = DG_KEY;
     const r = await owner.post(`/api/businesses/${businessId}/voice/session`, {});
     expect(r.status).toBe(200);
     expect(r.headers["cache-control"]).toBe("no-store");

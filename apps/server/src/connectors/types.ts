@@ -155,6 +155,16 @@ export interface ConnectorDefinition {
   /** Fields the user enters before authorizing (e.g. the store domain). */
   connectFields?: { key: string; label: string; placeholder?: string; help?: string; pattern?: string }[];
 
+  /**
+   * Alternative to OAuth: the user pastes an access token they created in the provider
+   * (e.g. a Shopify custom-app token, a HubSpot private-app token). Needs no platform app
+   * credentials. Such tokens don't expire and aren't refreshed; webhooks aren't registered.
+   */
+  tokenConnect?: {
+    fields: { key: string; label: string; placeholder?: string; help?: string; secret?: boolean }[];
+    instructions: string[];
+    connect(input: Record<string, string>): Promise<CallbackResult>;
+  };
   authorizeUrl?(p: { state: string; redirectUri: string; input: Record<string, string> }): string;
   handleCallback?(p: { query: Record<string, string>; redirectUri: string; input: Record<string, string> }): Promise<CallbackResult>;
   refreshCredentials?(creds: Credentials): Promise<{ credentials: Credentials; expiresAt: Date | null }>;

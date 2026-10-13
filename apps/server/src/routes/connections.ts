@@ -12,6 +12,7 @@ import { decryptJson } from "../lib/crypto.js";
 import { saveCredentials } from "../connectors/credentials.js";
 import { ProviderError } from "../connectors/http.js";
 import { catalog, connectorStatus, getConnector } from "../connectors/registry.js";
+import type { CallbackResult, ConnectorDefinition } from "../connectors/types.js";
 import { enqueue } from "../jobs/queue.js";
 import { assertWithinLimit } from "../billing/entitlements.js";
 
@@ -64,6 +65,7 @@ connectionsRouter.get("/businesses/:businessId/connections", requireUser, async 
         lastErrorAt: c.last_error_at,
         consecutiveFailures: c.consecutive_failures,
         webhookTopics: c.settings?.webhookTopics ?? [],
+        authMode: c.settings?.authMode === "token" ? "token" : "oauth",
         reportingDelay: def?.reportingDelay ?? null,
         latestJob: j ? { id: j.id, status: j.status, attempts: j.attempts, lastError: j.last_error, createdAt: j.created_at, finishedAt: j.finished_at, nextAttemptAt: j.status === "queued" ? j.run_at : null, result: j.result } : null,
         connectedAt: c.created_at,
@@ -150,46 +152,7 @@ oauthRouter.get("/oauth/:provider/callback", async (req: Request, res: Response)
 
   try {
     const result = await def.handleCallback({ query, redirectUri: redirectUri(provider), input: st.input });
-    const connectionId = await withSystem(async (db) => {
-      // Re-authorization keeps the existing connection; connecting the same account again reuses it.
-      let id: string | null = st.connection_id;
-      if (!id) {
-        const existing = await db.query(
-          `SELECT id FROM connections WHERE business_id = $1 AND provider = $2 AND external_account_id = $3 AND disconnected_at IS NULL`,
-          [st.business_id, provider, result.externalAccountId],
-        );
-        id = existing.rows[0]?.id ?? null;
-      }
-      if (id) {
-        await db.query(
-          `UPDATE connections SET display_name = $2, scopes = $3, external_account_id = $4, settings = settings || $5::jsonb,
-                  status = CASE WHEN status IN ('reauth_required', 'error') THEN 'active' ELSE status END, last_error = NULL, consecutive_failures = 0, updated_at = now()
-            WHERE id = $1`,
-          [id, result.displayName, result.scopes, result.externalAccountId, JSON.stringify(result.settings ?? {})],
-        );
-      } else {
-        const ins = await db.query(
-          `INSERT INTO connections (workspace_id, business_id, provider, display_name, external_account_id, status, scopes, settings, created_by)
-           VALUES ($1, $2, $3, $4, $5, 'selecting_assets', $6, $7, $8) RETURNING id`,
-          [st.workspace_id, st.business_id, provider, result.displayName, result.externalAccountId, result.scopes, JSON.stringify(result.settings ?? {}), st.user_id],
-        );
-        id = ins.rows[0].id as string;
-      }
-      await saveCredentials(db, id, result.credentials, result.tokenExpiresAt ?? null);
-      const connection = (await db.query("SELECT * FROM connections WHERE id = $1", [id])).rows[0];
-      const assets = def.discoverAssets ? await def.discoverAssets(result.credentials, connection) : [];
-      for (const a of assets) {
-        await db.query(
-          `INSERT INTO connection_assets (workspace_id, business_id, connection_id, provider_asset_id, name, kind, currency, timezone, metadata)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-           ON CONFLICT (connection_id, provider_asset_id) DO UPDATE SET name = excluded.name, currency = excluded.currency, timezone = excluded.timezone, metadata = excluded.metadata`,
-          [st.workspace_id, st.business_id, id, a.providerAssetId, a.name, a.kind, a.currency ?? null, a.timezone ?? null, JSON.stringify(a.metadata ?? {})],
-        );
-      }
-      await audit(db, { workspaceId: st.workspace_id, businessId: st.business_id, actorUserId: st.user_id, action: st.connection_id ? "connection.reauthorized" : "connection.authorized", targetType: "connection", targetId: id, metadata: { provider, account: result.externalAccountId, scopes: result.scopes } });
-      await db.query("SELECT app.notify_business($1, 'connection_updated', $2)", [st.business_id, JSON.stringify({ connectionId: id })]);
-      return id;
-    });
+    const connectionId = await finishConnection({ def, provider, result, workspaceId: st.workspace_id, businessId: st.business_id, userId: st.user_id, connectionId: st.connection_id });
     res.redirect(`${config.appUrl}/app/b/${st.business_id}/connections?connection=${connectionId}${st.connection_id ? "&reconnected=1" : "&step=assets"}`);
   } catch (e) {
     const msg = e instanceof ProviderError ? e.message : "We couldn't complete the connection. Please try again.";
@@ -197,6 +160,87 @@ oauthRouter.get("/oauth/:provider/callback", async (req: Request, res: Response)
     else if (e.detail) console.warn("[oauth] provider error", e.kind, e.detail.slice(0, 300));
     fail(st.business_id, msg);
   }
+});
+
+/**
+ * Create (or update, on re-authorization) the connection for an authorized account,
+ * store its encrypted credentials and discover its assets. Shared by the OAuth callback
+ * and token connections.
+ */
+async function finishConnection(p: { def: ConnectorDefinition; provider: string; result: CallbackResult; workspaceId: string; businessId: string; userId: string; connectionId: string | null; via?: "token" }) {
+  const { def, provider, result } = p;
+  const st = { workspace_id: p.workspaceId, business_id: p.businessId, user_id: p.userId, connection_id: p.connectionId };
+  return withSystem(async (db) => {
+    // Re-authorization keeps the existing connection; connecting the same account again reuses it.
+    let id: string | null = st.connection_id;
+    if (!id) {
+      const existing = await db.query(
+        `SELECT id FROM connections WHERE business_id = $1 AND provider = $2 AND external_account_id = $3 AND disconnected_at IS NULL`,
+        [st.business_id, provider, result.externalAccountId],
+      );
+      id = existing.rows[0]?.id ?? null;
+    }
+    if (id) {
+      await db.query(
+        `UPDATE connections SET display_name = $2, scopes = $3, external_account_id = $4, settings = settings || $5::jsonb,
+                status = CASE WHEN status IN ('reauth_required', 'error') THEN 'active' ELSE status END, last_error = NULL, consecutive_failures = 0, updated_at = now()
+          WHERE id = $1`,
+        [id, result.displayName, result.scopes, result.externalAccountId, JSON.stringify(result.settings ?? {})],
+      );
+    } else {
+      const ins = await db.query(
+        `INSERT INTO connections (workspace_id, business_id, provider, display_name, external_account_id, status, scopes, settings, created_by)
+         VALUES ($1, $2, $3, $4, $5, 'selecting_assets', $6, $7, $8) RETURNING id`,
+        [st.workspace_id, st.business_id, provider, result.displayName, result.externalAccountId, result.scopes, JSON.stringify(result.settings ?? {}), st.user_id],
+      );
+      id = ins.rows[0].id as string;
+    }
+    await saveCredentials(db, id, result.credentials, result.tokenExpiresAt ?? null);
+    const connection = (await db.query("SELECT * FROM connections WHERE id = $1", [id])).rows[0];
+    const assets = def.discoverAssets ? await def.discoverAssets(result.credentials, connection) : [];
+    for (const a of assets) {
+      await db.query(
+        `INSERT INTO connection_assets (workspace_id, business_id, connection_id, provider_asset_id, name, kind, currency, timezone, metadata)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         ON CONFLICT (connection_id, provider_asset_id) DO UPDATE SET name = excluded.name, currency = excluded.currency, timezone = excluded.timezone, metadata = excluded.metadata`,
+        [st.workspace_id, st.business_id, id, a.providerAssetId, a.name, a.kind, a.currency ?? null, a.timezone ?? null, JSON.stringify(a.metadata ?? {})],
+      );
+    }
+    await audit(db, { workspaceId: st.workspace_id, businessId: st.business_id, actorUserId: st.user_id, action: st.connection_id ? "connection.reauthorized" : "connection.authorized", targetType: "connection", targetId: id, metadata: { provider, account: result.externalAccountId, scopes: result.scopes, ...(p.via ? { via: p.via } : {}) } });
+    await db.query("SELECT app.notify_business($1, 'connection_updated', $2)", [st.business_id, JSON.stringify({ connectionId: id })]);
+    return id;
+  });
+}
+
+// ------------------------------------------------------------------ token connections
+
+const perUserKey = (r: Request) => r.user?.id ?? r.ip ?? "anon";
+
+const tokenBody = z.object({ input: z.record(z.string(), z.string().trim().max(500)).default({}) });
+
+/** Connect with an access token the user created in the provider (no platform OAuth app needed). */
+connectionsRouter.post("/businesses/:businessId/connections/:provider/token", requireUser, rateLimit({ name: "token-connect", max: 10, windowMs: 60_000, key: perUserKey }), async (req, res) => {
+  const body = tokenBody.parse(req.body);
+  const provider = String(req.params.provider);
+  const def = getConnector(provider);
+  if (!def?.tokenConnect) throw prerequisite("This connector can only be connected through its sign-in page.");
+  const ctx = await inBusiness(req, req.params.businessId, "connection.manage", async ({ business, userId }) => {
+    if (business.is_demo) throw badRequest("Demo businesses can't connect real accounts. Create a real business first.");
+    await assertWithinLimit(business.workspace_id, "connections");
+    return { business, userId };
+  });
+  let result: CallbackResult;
+  try {
+    result = await def.tokenConnect.connect(body.input);
+  } catch (e) {
+    if (e instanceof ProviderError) {
+      if (e.detail) console.warn("[connections] token connect rejected", provider, e.kind, e.status);
+      throw badRequest(e.kind === "auth" ? `${def.name} rejected the token. Check that it was copied completely and the app is installed.` : e.message);
+    }
+    throw e;
+  }
+  const id = await finishConnection({ def, provider, result, workspaceId: ctx.business.workspace_id, businessId: ctx.business.id, userId: ctx.userId, connectionId: null, via: "token" });
+  res.status(201).json({ connectionId: id });
 });
 
 // ------------------------------------------------------------------ assets, sync, disconnect

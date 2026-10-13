@@ -405,6 +405,35 @@ export const shopify: ConnectorDefinition = {
     };
   },
 
+  tokenConnect: {
+    fields: [
+      { key: "shop", label: "Store domain", placeholder: "your-store.myshopify.com" },
+      { key: "accessToken", label: "Admin API access token", placeholder: "shpat_…", secret: true },
+    ],
+    instructions: [
+      "In Shopify admin open Settings → Apps and sales channels → Develop apps, and create an app.",
+      "Under Configuration → Admin API scopes, enable read_orders, read_products and read_inventory (and read_all_orders for history beyond 60 days, if granted).",
+      "Install the app, then reveal and copy the Admin API access token (it starts with shpat_).",
+    ],
+    async connect(input) {
+      const shop = normalizeShopDomain(input.shop ?? "");
+      const token = (input.accessToken ?? "").trim();
+      if (!/^shp(at|ca|ss)_[A-Za-z0-9]{16,}$/.test(token)) throw new ProviderError("permanent", "That doesn't look like a Shopify Admin API access token (it starts with shpat_).");
+      const data: any = await gql(shop, token, `{ shop { name myshopifyDomain currencyCode ianaTimezone } currentAppInstallation { accessScopes { handle } } }`);
+      const scopes: string[] = (data.currentAppInstallation?.accessScopes ?? []).map((s: any) => String(s.handle));
+      const missing = SCOPES.filter((s) => !scopes.includes(s));
+      if (missing.length) throw new ProviderError("scope", `The token is missing the Admin API scope${missing.length > 1 ? "s" : ""} ${missing.join(", ")}. Add ${missing.length > 1 ? "them" : "it"} to the app in Shopify and try again.`);
+      return {
+        credentials: { shop, access_token: token, refresh_token: null, mode: "token" },
+        scopes,
+        externalAccountId: data.shop?.myshopifyDomain ?? shop,
+        displayName: data.shop?.name ?? shop,
+        tokenExpiresAt: null,
+        settings: { shop, authMode: "token" },
+      };
+    },
+  },
+
   needsRefresh(creds, expiresAt) {
     return Boolean(creds.refresh_token && expiresAt && expiresAt.getTime() - Date.now() < 5 * 60_000);
   },
@@ -441,6 +470,8 @@ export const shopify: ConnectorDefinition = {
   },
 
   async revoke(creds, connection) {
+    // A pasted custom-app token belongs to the merchant's own app: leave it installed.
+    if (creds.mode === "token") return;
     // Uninstalls the app from the store, revoking the token on Shopify's side.
     await providerFetch(`${shopBase(String(connection.external_account_id))}/admin/api_permissions/current.json`, {
       provider: "Shopify",

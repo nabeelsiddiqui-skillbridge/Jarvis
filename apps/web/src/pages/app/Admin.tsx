@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, ExternalLink, KeyRound, RotateCcw, Search, ShieldAlert, XCircle } from "lucide-react";
 import { PLANS, PLAN_IDS, type PlanId } from "@bca/shared";
-import { errorMessage, get, post, put } from "@/lib/api";
+import { api, errorMessage, get, post, put } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { useMe } from "@/lib/session";
 import { Badge } from "@/components/ui/Badge";
@@ -28,6 +28,7 @@ const TABS = [
   { value: "jobs", label: "Jobs" },
   { value: "usage", label: "AI & voice usage" },
   { value: "flags", label: "Feature flags" },
+  { value: "credentials", label: "Credentials" },
   { value: "config", label: "Configuration" },
   { value: "audit", label: "Audit" },
   { value: "support", label: "Support access" },
@@ -55,6 +56,7 @@ export function Admin() {
       {tab === "jobs" && <Jobs />}
       {tab === "usage" && <Usage />}
       {tab === "flags" && <Flags />}
+      {tab === "credentials" && <Credentials />}
       {tab === "config" && <Config />}
       {tab === "audit" && <Audit workspaceId={params.get("ws")} />}
       {tab === "support" && <Support />}
@@ -481,6 +483,74 @@ function Flags() {
         ))}
       </div>
     )}</Loading>
+  );
+}
+
+// ------------------------------------------------------------------ credentials
+
+interface Setting { key: string; label: string; group: string; secret: boolean; help: string | null; configured: boolean; source: "environment" | "admin" | null; updatedAt: string | null; value: string | null }
+
+const GROUP_URLS: Record<string, (c: any) => string[]> = {
+  Shopify: (c) => c.connectors.filter((x: any) => x.id === "shopify").flatMap((x: any) => [`Redirect URL: ${x.redirectUri}`, `Webhooks: ${x.webhookUrl}`]),
+  "Google (GA4, Search Console, Ads)": (c) => c.connectors.filter((x: any) => ["ga4", "gsc", "google_ads"].includes(x.id)).map((x: any) => `Authorized redirect URI: ${x.redirectUri}`),
+  HubSpot: (c) => c.connectors.filter((x: any) => x.id === "hubspot").flatMap((x: any) => [`Redirect URL: ${x.redirectUri}`, `Webhooks: ${x.webhookUrl}`]),
+  "Billing (Stripe)": (c) => [`Webhook endpoint: ${c.billing.webhookUrl}`],
+};
+
+/** Provider app credentials and API keys, set from the browser. Stored encrypted; secrets are never shown again. */
+function Credentials() {
+  const q = useAdmin<Setting[]>("settings");
+  const cfg = useAdmin<any>("config");
+  const groups = new Map<string, Setting[]>();
+  for (const s of q.data ?? []) groups.set(s.group, [...(groups.get(s.group) ?? []), s]);
+  return (
+    <Loading q={q}>{() => (
+      <div className="space-y-5">
+        <Prerequisite title="Connect providers from here">
+          Paste each provider's app credentials to turn on one-click sign-in for every customer. Values are encrypted with the platform key, take effect within seconds, are never shown again (only IDs are displayed) and every change is audited. A value set in the hosting environment takes precedence and can only be changed there.
+        </Prerequisite>
+        <div className="grid gap-5 xl:grid-cols-2">
+          {[...groups].map(([group, items]) => (
+            <Card key={group} title={group}>
+              {cfg.data && GROUP_URLS[group] && (
+                <ul className="mb-4 space-y-1 rounded-[4px] border border-line bg-panel-2/60 p-3 font-mono text-[11px] text-muted">
+                  <li className="hud-label text-[10px] text-subtle">Register with the provider</li>
+                  {GROUP_URLS[group]!(cfg.data).map((u) => <li key={u} className="break-all">{u}</li>)}
+                </ul>
+              )}
+              <ul className="space-y-4">{items.map((s) => <SettingRow key={s.key} s={s} />)}</ul>
+            </Card>
+          ))}
+        </div>
+      </div>
+    )}</Loading>
+  );
+}
+
+function SettingRow({ s }: { s: Setting }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [value, setValue] = useState("");
+  const done = (msg: string) => { setValue(""); qc.invalidateQueries({ queryKey: ["admin"] }); toast(msg); };
+  const save = useMutation({ mutationFn: () => put(`/admin/settings/${s.key}`, { value }), onSuccess: () => done(`${s.label} saved`), onError: (e) => toast(errorMessage(e), "error") });
+  const clear = useMutation({ mutationFn: () => api(`/admin/settings/${s.key}`, { method: "DELETE" }), onSuccess: () => done(`${s.label} cleared`), onError: (e) => toast(errorMessage(e), "error") });
+  const env = s.source === "environment";
+  return (
+    <li>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <label htmlFor={`set-${s.key}`} className="text-sm font-medium">{s.label}</label>
+        {env ? <Badge tone="violet">Set in environment</Badge> : s.configured ? <Badge tone="success" icon={<CheckCircle2 className="size-3" />}>Set{s.updatedAt ? ` · ${when(s.updatedAt)}` : ""}</Badge> : <Badge tone="warning">Not set</Badge>}
+      </div>
+      <p className="font-mono text-[10.5px] text-subtle">{s.key}{s.value ? ` = ${s.value}` : ""}</p>
+      {s.help && <p className="text-xs text-muted">{s.help}</p>}
+      {!env && (
+        <form className="mt-2 flex gap-2" onSubmit={(e) => { e.preventDefault(); if (value.trim()) save.mutate(); }}>
+          <Input id={`set-${s.key}`} type={s.secret ? "password" : "text"} autoComplete="off" spellCheck={false} placeholder={s.configured ? (s.secret ? "•••••••• (enter a new value to replace)" : "Enter a new value to replace") : "Paste value"} value={value} onChange={(e) => setValue(e.target.value)} />
+          <Button type="submit" size="md" variant="secondary" loading={save.isPending} disabled={!value.trim()}>Save</Button>
+          {s.configured && <Button size="md" variant="ghost" loading={clear.isPending} onClick={() => { if (confirm(`Clear ${s.label}? Anything that depends on it stops working.`)) clear.mutate(); }}>Clear</Button>}
+        </form>
+      )}
+    </li>
   );
 }
 

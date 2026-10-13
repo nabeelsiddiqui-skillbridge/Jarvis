@@ -67,6 +67,8 @@ export interface CatalogEntry {
   reportingDelay: string | null;
   connectFields: ConnectorDefinition["connectFields"];
   supportsWebhooks: boolean;
+  /** Connect with an access token instead of OAuth (works without platform app credentials). */
+  tokenConnect: { fields: NonNullable<ConnectorDefinition["tokenConnect"]>["fields"]; instructions: string[] } | null;
 }
 
 export function catalog(): CatalogEntry[] {
@@ -80,7 +82,7 @@ export function catalog(): CatalogEntry[] {
       status,
       statusNote:
         status === "available" ? "Ready to connect."
-        : status === "config_required" ? "The platform operator must add provider credentials before this can be connected."
+        : status === "config_required" ? (d.tokenConnect ? "Connect with an access token from your account, or a platform administrator can add app credentials for one-click sign-in." : "A platform administrator must add this provider's app credentials (Admin → Credentials) before it can be connected.")
         : "Waiting for the provider to approve access for this platform.",
       missingConfig,
       accessRequirements: d.accessRequirements ?? [],
@@ -90,6 +92,7 @@ export function catalog(): CatalogEntry[] {
       reportingDelay: d.reportingDelay,
       connectFields: d.connectFields,
       supportsWebhooks: d.supportsWebhooks,
+      tokenConnect: d.tokenConnect ? { fields: d.tokenConnect.fields, instructions: d.tokenConnect.instructions } : null,
     };
   });
   const planned = PLANNED.filter((p) => !IMPLEMENTED.some((d) => d.id === p.id)).map((p): CatalogEntry => ({
@@ -107,6 +110,7 @@ export function catalog(): CatalogEntry[] {
     reportingDelay: null,
     connectFields: [],
     supportsWebhooks: false,
+    tokenConnect: null,
   }));
   return [...implemented, ...planned];
 }

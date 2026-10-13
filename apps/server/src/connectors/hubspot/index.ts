@@ -444,7 +444,24 @@ export const hubspot: ConnectorDefinition = {
       tokenExpiresAt: new Date(Date.now() + t.expires_in * 1000),
     };
   },
-  needsRefresh: (_c, expiresAt) => !expiresAt || expiresAt.getTime() - Date.now() < 5 * 60_000,
+  tokenConnect: {
+    fields: [{ key: "accessToken", label: "Private app access token", placeholder: "pat-…", secret: true }],
+    instructions: [
+      "In HubSpot open Settings → Integrations → Private apps (or Development → Legacy apps) and create a private app.",
+      `Under Scopes, enable ${READ_SCOPES.filter((s) => s !== "oauth").join(" and ")} (add ${WRITE_SCOPE} to allow approved deal-stage changes).`,
+      "Create the app and copy its access token (it starts with pat-).",
+    ],
+    async connect(input) {
+      const token = (input.accessToken ?? "").trim();
+      if (!/^pat-[a-z0-9]+-[A-Za-z0-9-]{16,}$/.test(token)) throw new ProviderError("permanent", "That doesn't look like a HubSpot private app token (it starts with pat-).");
+      const creds = { access_token: token, refresh_token: null, mode: "token" };
+      const info = await accountInfo(creds);
+      // Private-app tokens don't report their scopes; reads that aren't allowed surface as sync errors naming the scope.
+      return { credentials: creds, scopes: READ_SCOPES, externalAccountId: String(info.portalId), displayName: `HubSpot account #${info.portalId}`, tokenExpiresAt: null, settings: { authMode: "token" } };
+    },
+  },
+  // Private-app tokens (no refresh token) don't expire.
+  needsRefresh: (c, expiresAt) => Boolean(c.refresh_token) && (!expiresAt || expiresAt.getTime() - Date.now() < 5 * 60_000),
   async refreshCredentials(creds) {
     try {
       const t = await token({ grant_type: "refresh_token", client_id: process.env.HUBSPOT_CLIENT_ID!, client_secret: process.env.HUBSPOT_CLIENT_SECRET!, refresh_token: creds.refresh_token });
@@ -465,6 +482,7 @@ export const hubspot: ConnectorDefinition = {
     await accountInfo(await ctx.credentials());
   },
   async revoke(creds) {
+    if (!creds.refresh_token) return; // private-app token: the merchant manages it in HubSpot
     await providerFetch(API(`oauth/v1/refresh-tokens/${encodeURIComponent(creds.refresh_token)}`), { provider: "HubSpot", method: "DELETE", retries: 0 });
   },
 };

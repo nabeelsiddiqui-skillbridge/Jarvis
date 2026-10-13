@@ -2,10 +2,13 @@ import { assertProductionConfig, config } from "./config.js";
 import { migrate } from "./db/migrate.js";
 import { createApp } from "./app.js";
 import { syncPlatformAdmins } from "./auth/admins.js";
+import { loadPlatformSecrets, watchPlatformSecrets } from "./lib/platformSecrets.js";
 
 assertProductionConfig();
 if (process.env.AUTO_MIGRATE !== "false") await migrate(config.databaseUrl, { quiet: true });
 await syncPlatformAdmins();
+await loadPlatformSecrets();
+watchPlatformSecrets();
 
 createApp().listen(config.port, (err?: Error) => {
   // Express 5 passes listen errors (e.g. EADDRINUSE) to this callback.

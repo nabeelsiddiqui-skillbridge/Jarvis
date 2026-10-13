@@ -20,13 +20,19 @@ export const config = {
   /** Comma-separated emails that become platform administrators on sign-up / boot. */
   platformAdmins: (env("PLATFORM_ADMIN_EMAILS") ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
   anthropic: {
-    apiKey: env("ANTHROPIC_API_KEY"),
+    // Read on each use: platform administrators can set provider keys at runtime (Admin → Credentials).
+    get apiKey() { return env("ANTHROPIC_API_KEY"); },
     model: env("ASSISTANT_MODEL") ?? "claude-opus-5-5",
     effort: (env("ASSISTANT_EFFORT") ?? "medium") as "low" | "medium" | "high",
   },
   voice: {
     /** Deepgram: streaming speech-to-text (browser connects with a short-lived token) and text-to-speech (proxied). */
-    deepgramKey: env("DEEPGRAM_API_KEY"),
+    get deepgramKey() { return env("DEEPGRAM_API_KEY"); },
+    /** ElevenLabs text-to-speech (optional): natural voices users can choose from. Takes precedence over Deepgram for speech output. */
+    get elevenlabsKey() { return env("ELEVENLABS_API_KEY"); },
+    get elevenlabsModel() { return env("ELEVENLABS_MODEL") ?? "eleven_flash_v2_5"; },
+    /** Default voice when a user hasn't picked one (ElevenLabs voice id). */
+    get elevenlabsVoice() { return env("ELEVENLABS_DEFAULT_VOICE_ID") ?? "21m00Tcm4TlvDq8ikWAM"; },
     sttModel: env("VOICE_STT_MODEL") ?? "nova-3",
     ttsModel: env("VOICE_TTS_MODEL") ?? "aura-2-thalia-en",
     language: env("VOICE_LANGUAGE") ?? "en",
@@ -44,6 +50,7 @@ export function configStatus(): SecretStatus[] {
     ["ENCRYPTION_KEY", "Token encryption key", "Storing provider credentials (required in production)"],
     ["ANTHROPIC_API_KEY", "Anthropic API key", "AI assistant, voice, AI dashboard generation, insight explanations"],
     ["DEEPGRAM_API_KEY", "Deepgram API key", "Streaming voice (speech-to-text and text-to-speech); without it the browser's built-in speech is used where available"],
+    ["ELEVENLABS_API_KEY", "ElevenLabs API key", "Natural, selectable voices for spoken answers"],
     ["SHOPIFY_API_KEY", "Shopify app client ID", "Shopify connector"],
     ["SHOPIFY_API_SECRET", "Shopify app client secret", "Shopify connector + webhook verification"],
     ["GOOGLE_CLIENT_ID", "Google OAuth client ID", "GA4, Search Console, Google Ads"],

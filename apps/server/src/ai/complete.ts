@@ -9,7 +9,12 @@ import { recordUsage } from "../lib/usage.js";
  * tools and no data access of its own.
  */
 let client: Anthropic | null = null;
-const anthropic = () => (client ??= new Anthropic({ apiKey: config.anthropic.apiKey, maxRetries: 2 }));
+let clientKey: string | undefined;
+// Rebuilt when the key changes (it can be set at runtime in Admin → Credentials).
+const anthropic = () => {
+  if (!client || clientKey !== config.anthropic.apiKey) { clientKey = config.anthropic.apiKey; client = new Anthropic({ apiKey: clientKey, maxRetries: 2 }); }
+  return client;
+};
 export const aiConfigured = () => Boolean(config.anthropic.apiKey);
 
 export class AiUnavailable extends Error {}

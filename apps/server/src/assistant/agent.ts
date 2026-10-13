@@ -19,7 +19,12 @@ const MAX_TOOL_ROUNDS = 10;
 const MAX_TOKENS = 32_000;
 
 let client: Anthropic | null = null;
-const anthropic = () => (client ??= new Anthropic({ apiKey: config.anthropic.apiKey, maxRetries: 2 }));
+let clientKey: string | undefined;
+// Rebuilt when the key changes (it can be set at runtime in Admin → Credentials).
+const anthropic = () => {
+  if (!client || clientKey !== config.anthropic.apiKey) { clientKey = config.anthropic.apiKey; client = new Anthropic({ apiKey: clientKey, maxRetries: 2 }); }
+  return client;
+};
 export const assistantConfigured = () => Boolean(config.anthropic.apiKey);
 
 // Stable across all requests (cached): rules only, no per-business or per-day content.

@@ -17,6 +17,8 @@ export interface MockState {
   tokens: Set<string>;
   refreshTokens: Set<string>;
   calls: { refresh: number; graphql: number; revoke: number; webhooksCreated: string[] };
+  /** Scopes reported for a custom-app token (currentAppInstallation). */
+  appScopes?: string[];
   fail: { nextGraphql503: number; nextGraphql401: number; throttleOnce: boolean };
 }
 
@@ -137,7 +139,10 @@ export function startMockShopify(): Promise<{ url: string; state: MockState; clo
       const page = list.slice(start, start + (v.first ?? 50));
       return res.json({ data: { orders: { pageInfo: { hasNextPage: start + page.length < list.length, endCursor: String(start + page.length) }, nodes: page.map(toNode) } }, extensions: ext });
     }
-    if (q.includes("shop")) return res.json({ data: { shop: { name: "Acme Outdoors", myshopifyDomain: req.params.shop, currencyCode: "USD", ianaTimezone: "America/New_York" } }, extensions: ext });
+    if (q.includes("shop")) {
+      const installation = q.includes("currentAppInstallation") ? { currentAppInstallation: { accessScopes: (state.appScopes ?? ["read_orders", "read_products", "read_inventory"]).map((handle) => ({ handle })) } } : {};
+      return res.json({ data: { shop: { name: "Acme Outdoors", myshopifyDomain: req.params.shop, currencyCode: "USD", ianaTimezone: "America/New_York" }, ...installation }, extensions: ext });
+    }
     res.status(400).json({ errors: [{ message: "unsupported query" }] });
   });
 

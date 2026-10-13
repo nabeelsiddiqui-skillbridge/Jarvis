@@ -15,6 +15,7 @@ import { Field, Input } from "@/components/ui/Field";
 import { Skeleton } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
 import { relativeTime } from "@/components/widgets/WidgetFrame";
+import { Tabs } from "@/components/ui/Tabs";
 
 interface CatalogEntry {
   id: string; name: string; category: string; description: string;
@@ -24,7 +25,12 @@ interface CatalogEntry {
   metrics: string[]; actions: string[]; reportingDelay: string | null;
   connectFields?: { key: string; label: string; placeholder?: string; help?: string }[];
   supportsWebhooks: boolean;
+  /** Connect by pasting an access token created in the provider (works without platform OAuth credentials). */
+  tokenConnect: { fields: { key: string; label: string; placeholder?: string; help?: string; secret?: boolean }[]; instructions: string[] } | null;
 }
+
+/** Whether a catalog entry can be connected right now, by either method. */
+const connectable = (e: CatalogEntry) => e.status === "available" || (Boolean(e.tokenConnect) && e.status !== "planned");
 
 interface Asset { id: string; name: string; kind: string; selected: boolean; currency: string | null; timezone: string | null; latestDataDate: string | null; lastSyncedAt: string | null; coveredFrom: string | null }
 interface Connection {
@@ -32,7 +38,7 @@ interface Connection {
   status: "pending" | "selecting_assets" | "syncing" | "active" | "error" | "reauth_required" | "disconnected";
   isDemo: boolean; scopes: string[]; requestedScopes: { scope: string; reason: string; optional?: boolean }[];
   assets: Asset[]; lastSuccessAt: string | null; lastSyncStartedAt: string | null; lastError: string | null; lastErrorAt: string | null;
-  consecutiveFailures: number; webhookTopics: string[]; reportingDelay: string | null;
+  consecutiveFailures: number; webhookTopics: string[]; reportingDelay: string | null; authMode: "oauth" | "token";
   latestJob: { id: string; status: string; attempts: number; lastError: string | null; createdAt: string; finishedAt: string | null; nextAttemptAt: string | null; result: any } | null;
   connectedAt: string; disconnectedAt: string | null;
 }
@@ -113,7 +119,7 @@ export function Connections() {
 
       <section aria-labelledby="catalog-h">
         <h2 id="catalog-h" className="mb-1 text-[15px] font-semibold">Add a source</h2>
-        <p className="mb-4 text-sm text-muted">Only connectors marked <b className="text-success">Available</b> are working integrations. Planned ones are on the roadmap and can't be connected yet.</p>
+        <p className="mb-4 text-sm text-muted">Connectors marked <b className="text-success">Available</b> are working integrations — some can also be connected with an access token from your own account. Planned ones are on the roadmap and can't be connected yet.</p>
         {catalog.isPending ? <Skeleton className="h-60" /> : groups.map(([cat, entries]) => (
           <div key={cat} className="mb-6">
             <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-subtle">{cat}</h3>
@@ -122,13 +128,13 @@ export function Connections() {
                 <li key={e.id} className={cn("panel flex flex-col gap-3 p-4", e.status === "planned" && "opacity-70")}>
                   <div className="flex items-start justify-between gap-2">
                     <p className="font-semibold">{e.name}</p>
-                    <Badge tone={STATUS_LABEL[e.status].tone}>{STATUS_LABEL[e.status].label}</Badge>
+                    {e.status === "config_required" && e.tokenConnect ? <Badge tone="success">Available · token</Badge> : <Badge tone={STATUS_LABEL[e.status].tone}>{STATUS_LABEL[e.status].label}</Badge>}
                   </div>
                   <p className="text-sm text-muted">{e.description}</p>
                   <p className="text-xs text-subtle">{e.statusNote}</p>
                   {e.status !== "planned" && (
-                    <Button size="sm" variant={e.status === "available" ? "primary" : "secondary"} className="mt-auto self-start" disabled={!manage || b.isDemo} onClick={() => setConnecting(e)}>
-                      {e.status === "available" ? "Connect" : "Details"}
+                    <Button size="sm" variant={connectable(e) ? "primary" : "secondary"} className="mt-auto self-start" disabled={!manage || b.isDemo} onClick={() => setConnecting(e)}>
+                      {connectable(e) ? "Connect" : "Details"}
                     </Button>
                   )}
                 </li>
@@ -138,7 +144,14 @@ export function Connections() {
         ))}
       </section>
 
-      <ConnectDialog entry={connecting} onClose={() => setConnecting(null)} reconnectId={connecting ? active.find((c) => c.provider === connecting.id && c.status === "reauth_required")?.id : undefined} />
+      <ConnectDialog entry={connecting} onClose={() => setConnecting(null)} reconnectId={connecting ? active.find((c) => c.provider === connecting.id && c.status === "reauth_required")?.id : undefined}
+        onConnected={async (id) => {
+          setConnecting(null);
+          const list = await qc.fetchQuery({ queryKey: connectionsKey(b.id), queryFn: () => get<Connection[]>(`/businesses/${b.id}/connections`), staleTime: 0 });
+          const c = list.find((x) => x.id === id);
+          toast("Connected — choose what to sync");
+          if (c?.status === "selecting_assets") setAssetsFor(c);
+        }} />
       <AssetsDialog connection={assetsFor} onClose={() => setAssetsFor(null)} onSaved={() => { setAssetsFor(null); qc.invalidateQueries({ queryKey: connectionsKey(b.id) }); toast("Import started — data appears as it arrives."); }} />
     </>
   );
@@ -236,17 +249,25 @@ function ConnectionCard({ c, manage, onChooseAssets, onReconnect }: { c: Connect
   );
 }
 
-function ConnectDialog({ entry, onClose, reconnectId }: { entry: CatalogEntry | null; onClose: () => void; reconnectId?: string }) {
+function ConnectDialog({ entry, onClose, reconnectId, onConnected }: { entry: CatalogEntry | null; onClose: () => void; reconnectId?: string; onConnected: (connectionId: string) => void }) {
   const b = useBusiness();
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => { setValues({}); setError(null); }, [entry?.id]);
+  const oauthReady = entry?.status === "available";
+  const [method, setMethod] = useState<"oauth" | "token">("oauth");
+  useEffect(() => { setValues({}); setError(null); setMethod(entry && !oauthReady && entry.tokenConnect ? "token" : "oauth"); }, [entry?.id, oauthReady]);
   if (!entry) return null;
   const go = async () => {
     setBusy(true);
     setError(null);
     try {
+      if (method === "token") {
+        const r = await post<{ connectionId: string }>(`/businesses/${b.id}/connections/${entry.id}/token`, { input: values });
+        setBusy(false);
+        onConnected(r.connectionId);
+        return;
+      }
       const r = await post<{ url: string }>(`/businesses/${b.id}/connections/${entry.id}/authorize`, { input: values, connectionId: reconnectId });
       window.location.assign(r.url); // official provider authorization page
     } catch (e) {
@@ -254,36 +275,55 @@ function ConnectDialog({ entry, onClose, reconnectId }: { entry: CatalogEntry | 
       setBusy(false);
     }
   };
-  const available = entry.status === "available";
+  const token = entry.tokenConnect;
+  const canSubmit = method === "token" ? Boolean(token?.fields.every((f) => values[f.key]?.trim())) : oauthReady;
   return (
     <Dialog open onClose={onClose} title={`${reconnectId ? "Reconnect" : "Connect"} ${entry.name}`} size="lg"
-      footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button>{available && <Button variant="primary" loading={busy} onClick={go} icon={<ExternalLink className="size-4" />}>Continue to {entry.name}</Button>}</>}>
+      footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button>{(method === "token" ? Boolean(token) : oauthReady) && (
+        <Button variant="primary" loading={busy} disabled={!canSubmit} onClick={go} icon={method === "token" ? <KeyRound className="size-4" /> : <ExternalLink className="size-4" />}>{method === "token" ? "Connect" : `Continue to ${entry.name}`}</Button>
+      )}</>}>
       <div className="space-y-5 text-sm">
         <p className="text-muted">{entry.description}</p>
-        {entry.status === "config_required" && (
-          <Prerequisite tone="warning" title="Not configured on this platform yet">
-            A platform administrator must add the {entry.name} app credentials: <code className="text-fg">{entry.missingConfig.join(", ")}</code>.
-          </Prerequisite>
+        {token && (
+          <Tabs value={method} onChange={(v) => { setMethod(v); setError(null); }} items={[{ value: "oauth", label: `Sign in with ${entry.name}` }, { value: "token", label: "Use an access token" }]} />
         )}
-        {entry.status === "access_pending" && <Prerequisite tone="warning" title="Waiting for provider approval">{entry.name} hasn't approved this platform's access yet.</Prerequisite>}
-        {available && entry.connectFields?.map((f) => (
-          <Field key={f.key} label={f.label} hint={f.help}>{(p) => <Input {...p} data-autofocus placeholder={f.placeholder} value={values[f.key] ?? ""} onChange={(e) => setValues({ ...values, [f.key]: e.target.value })} />}</Field>
-        ))}
+        {method === "oauth" && (
+          <>
+            {entry.status === "config_required" && (
+              <Prerequisite tone="warning" title="One-click sign-in isn't set up yet">
+                A platform administrator can add the {entry.name} app credentials in <b>Platform admin → Credentials</b> (<code className="text-fg">{entry.missingConfig.join(", ")}</code>).{token ? " Meanwhile you can connect with an access token." : ""}
+              </Prerequisite>
+            )}
+            {entry.status === "access_pending" && <Prerequisite tone="warning" title="Waiting for provider approval">{entry.name} hasn't approved this platform's access yet.</Prerequisite>}
+            {oauthReady && entry.connectFields?.map((f) => (
+              <Field key={f.key} label={f.label} hint={f.help}>{(p) => <Input {...p} data-autofocus placeholder={f.placeholder} value={values[f.key] ?? ""} onChange={(e) => setValues({ ...values, [f.key]: e.target.value })} />}</Field>
+            ))}
+          </>
+        )}
+        {method === "token" && token && (
+          <>
+            <ol className="list-decimal space-y-1.5 pl-5 text-muted">{token.instructions.map((t) => <li key={t}>{t}</li>)}</ol>
+            {token.fields.map((f) => (
+              <Field key={f.key} label={f.label} hint={f.help}>{(p) => <Input {...p} type={f.secret ? "password" : "text"} autoComplete="off" spellCheck={false} placeholder={f.placeholder} value={values[f.key] ?? ""} onChange={(e) => setValues({ ...values, [f.key]: e.target.value })} />}</Field>
+            ))}
+            <p className="text-xs text-subtle">The token is checked with {entry.name}, encrypted before it's stored and never shown again. Data syncs on a schedule (live webhooks need one-click sign-in). You can revoke the token in {entry.name} at any time.</p>
+          </>
+        )}
         <div>
-          <p className="mb-2 font-medium">Permissions requested (read-only)</p>
+          <p className="mb-2 font-medium">Permissions needed (read-only)</p>
           <ul className="space-y-1.5">
             {entry.scopes.map((s) => (
               <li key={s.scope} className="flex gap-2"><ShieldCheck className="mt-0.5 size-4 shrink-0 text-accent" /><span><code className="break-all text-xs text-fg">{shortScope(s.scope)}</code> — <span className="text-muted">{s.reason}{s.optional ? " (optional)" : ""}</span></span></li>
             ))}
           </ul>
         </div>
-        {entry.accessRequirements.length > 0 && (
+        {entry.accessRequirements.length > 0 && method === "oauth" && (
           <details>
             <summary className="cursor-pointer text-muted">Provider requirements</summary>
             <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-muted">{entry.accessRequirements.map((r) => <li key={r}>{r}</li>)}</ul>
           </details>
         )}
-        <p className="text-xs text-subtle">You'll be sent to {entry.name} to approve access, then brought back to choose which accounts to sync. You can skip this and connect later.</p>
+        {method === "oauth" && <p className="text-xs text-subtle">You'll be sent to {entry.name} to approve access, then brought back to choose which accounts to sync. You can skip this and connect later.</p>}
         {error && <p role="alert" className="text-danger">{error}</p>}
       </div>
     </Dialog>

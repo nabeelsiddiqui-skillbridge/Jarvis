@@ -120,7 +120,8 @@ async function syncJob(db: pg.PoolClient, job: Job) {
     await enqueue(db, { type: "insights.detect", workspaceId: connection.workspace_id, businessId: connection.business_id, dedupeKey: `detect:${connection.business_id}`, runAt: new Date(Date.now() + 2 * 60_000), priority: -1 });
     if (mode === "initial") {
       await audit(db, { workspaceId: connection.workspace_id, businessId: connection.business_id, actorType: "system", action: "connection.initial_sync_completed", targetType: "connection", targetId: connection.id, metadata: { results } });
-      if (def.registerWebhooks) await enqueue(db, { type: "connection.register_webhooks", workspaceId: connection.workspace_id, businessId: connection.business_id, connectionId: connection.id, dedupeKey: `hooks:${connection.id}` });
+      // Token connections use the merchant's own app, whose webhooks we can't verify: they rely on scheduled syncs.
+      if (def.registerWebhooks && connection.settings?.authMode !== "token") await enqueue(db, { type: "connection.register_webhooks", workspaceId: connection.workspace_id, businessId: connection.business_id, connectionId: connection.id, dedupeKey: `hooks:${connection.id}` });
     }
   } catch (err) {
     await recordFailure(db, job, connection, err);

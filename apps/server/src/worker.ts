@@ -4,6 +4,7 @@ import { migrate } from "./db/migrate.js";
 import { claim } from "./jobs/queue.js";
 import { runJob } from "./jobs/handlers.js";
 import { scheduleDueWork } from "./jobs/scheduler.js";
+import { loadPlatformSecrets, watchPlatformSecrets } from "./lib/platformSecrets.js";
 
 /**
  * Background worker: runs sync, webhook, health and (later) automation jobs from
@@ -11,6 +12,9 @@ import { scheduleDueWork } from "./jobs/scheduler.js";
  */
 assertProductionConfig();
 if (process.env.AUTO_MIGRATE !== "false") await migrate(config.databaseUrl, { quiet: true });
+// Provider credentials set in the admin console (refreshed so changes reach this process).
+await loadPlatformSecrets();
+watchPlatformSecrets();
 
 const WORKER_ID = `${hostname()}:${process.pid}`;
 const CONCURRENCY = Number(process.env.WORKER_CONCURRENCY ?? 3);

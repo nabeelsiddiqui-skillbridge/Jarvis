@@ -9,6 +9,7 @@ import { withSystem } from "../db/pool.js";
 import { audit } from "../lib/audit.js";
 import { badRequest, conflict, forbidden, notFound } from "../lib/errors.js";
 import { FLAG_KEYS } from "../lib/flags.js";
+import { EnvironmentManaged, MANAGED_SETTINGS, isManaged, setPlatformSecret, settingSource, settingUpdatedAt } from "../lib/platformSecrets.js";
 import { notifyWorkspaceOwners } from "../lib/notify.js";
 import { rateLimit } from "../lib/rateLimit.js";
 import { IMPLEMENTED, connectorStatus } from "../connectors/registry.js";
@@ -311,6 +312,52 @@ adminRouter.get("/admin/config", (_req, res) => {
     },
     platformAdmins: config.platformAdmins.length,
   });
+});
+
+// ------------------------------------------------------------------ provider credentials (set from the console)
+
+adminRouter.get("/admin/settings", (_req, res) => {
+  res.json(MANAGED_SETTINGS.map((m) => {
+    const value = process.env[m.key]?.trim();
+    return {
+      key: m.key, label: m.label, group: m.group, secret: m.secret, help: m.help ?? null,
+      configured: Boolean(value),
+      source: settingSource(m.key),
+      updatedAt: settingUpdatedAt(m.key),
+      // Identifiers (client IDs, price IDs) are shown so they can be checked; secrets never are.
+      value: !m.secret && value ? value : null,
+    };
+  }));
+});
+
+const settingBody = z.object({ value: z.string().trim().min(1, "Enter a value").max(4096) });
+
+adminRouter.put("/admin/settings/:key", async (req, res) => {
+  const key = String(req.params.key);
+  if (!isManaged(key)) throw notFound("Setting");
+  const { value } = settingBody.parse(req.body);
+  if (/[\r\n]/.test(value)) throw badRequest("The value can't contain line breaks.");
+  try {
+    await setPlatformSecret(key, value, req.user!.id);
+  } catch (e) {
+    if (e instanceof EnvironmentManaged) throw conflict("This setting is defined in the hosting environment; change it there.");
+    throw e;
+  }
+  await withSystem((db) => audit(db, { actorUserId: req.user!.id, actorType: "support", action: "admin.setting_changed", targetType: "setting", targetId: key, metadata: { change: "set" }, ip: req.ip }));
+  res.json({ ok: true });
+});
+
+adminRouter.delete("/admin/settings/:key", async (req, res) => {
+  const key = String(req.params.key);
+  if (!isManaged(key)) throw notFound("Setting");
+  try {
+    await setPlatformSecret(key, null, req.user!.id);
+  } catch (e) {
+    if (e instanceof EnvironmentManaged) throw conflict("This setting is defined in the hosting environment; change it there.");
+    throw e;
+  }
+  await withSystem((db) => audit(db, { actorUserId: req.user!.id, actorType: "support", action: "admin.setting_changed", targetType: "setting", targetId: key, metadata: { change: "cleared" }, ip: req.ip }));
+  res.json({ ok: true });
 });
 
 // ------------------------------------------------------------------ audit history
