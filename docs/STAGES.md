@@ -99,3 +99,86 @@ Status of each stage of the build plan: what works, what is simulated, and what 
 4. Optional:
    - request `read_all_orders` approval from Shopify for history beyond 60 days (then set `SHOPIFY_REQUEST_ALL_ORDERS=true`);
    - protected customer data review for a public app.
+
+## Stage 4 — GA4, Search Console, Google Ads and HubSpot ✅
+
+**Works**
+- **Shared report sync** (`apps/server/src/connectors/report.ts`) for providers that serve pre-aggregated daily reports. Every report row is kept as a source record for provenance, and the fetched days are replaced atomically.
+  - Each source has a separate initial window, incremental lookback (late-arriving data) and nightly reconciliation window.
+  - Days are zero-filled only when the provider guarantees completeness, and never past the provider's latest available day.
+- **Google OAuth** (`connectors/google/oauth.ts`) is shared by the three Google connectors. Each requests only its own read-only scope, uses offline access, rejects partial grants, refreshes tokens about 5 minutes before expiry, and revokes the grant on disconnect.
+- **Google Analytics 4**:
+  - Properties are discovered through the Admin API with their own timezone and currency.
+  - The supported metrics are checked against each property's **metadata endpoint**, so a property without ecommerce events doesn't fail.
+  - Daily totals use `keepEmptyRows`, so no-traffic days are real zeros.
+  - Breakdowns: channel, source/medium, device, country and landing page. The top values are kept per day and the remainder is folded into "(other)", so breakdowns add up to totals.
+  - Windows: 400-day initial import, 3-day lookback, 30-day reconciliation.
+- **Search Console**:
+  - Only verified properties are listed. Dates follow Pacific Time.
+  - Only **finalized** data is requested. Days Google omits stay *unavailable* rather than zero.
+  - Position is stored as position × impressions, so average position is impression-weighted over any range.
+  - Query, page, country and device breakdowns, with "(other / anonymized)" carrying the queries Google withholds so totals reconcile.
+  - Up to 16 months of history.
+- **Google Ads**:
+  - Uses the REST API (version from `GOOGLE_ADS_API_VERSION`, default v25) with GAQL `searchStream` and the developer-token header.
+  - Client accounts are discovered through `listAccessibleCustomers` plus `customer_client`, including accounts reached via a manager (`login-customer-id`). Manager accounts themselves are not offered.
+  - Spend comes from `cost_micros`; impressions, clicks, conversions and conversion value are broken down by campaign, channel type and device.
+  - Days with no rows are real zeros.
+  - 7-day lookback and 30-day reconciliation, because conversions are restated.
+  - An unapproved developer token gets a plain-language explanation.
+- **HubSpot**:
+  - OAuth uses the v3 token endpoint (30-minute access tokens) and portal timezone/currency from account-info.
+  - Contacts and deals are imported incrementally by last-modified time through CRM search. Searches restart from the last timestamp when the **10,000-result search limit** is reached.
+  - Only aggregate-safe fields are stored (dates, stage, source, pipeline, amount) — **no names or emails**.
+  - Metrics: new contacts (by lifecycle stage and source), qualified leads (first MQL/SQL date), deals created/won/lost and won value in home currency (by pipeline), and win rate.
+  - **Open pipeline is a snapshot recorded from the connection date onward**. Earlier snapshots are not invented, and longer ranges report partial availability.
+  - Webhooks are verified with the v3 signature and a 5-minute replay window, de-duplicated by event ids, re-fetched via batch read, and handle deletions.
+  - The refresh token is revoked on disconnect.
+- Connector freshness metadata now comes from the connector definitions, so freshness labels can't drift from the connectors.
+- `.env.example` documents the Google and HubSpot setup. The connections UI shortens Google scope URLs and keeps long values inside the cards.
+
+**Verified** (`apps/server/test/google.test.ts`, `hubspot.test.ts`, against local stand-ins in `test/mock-providers.ts`)
+- GA4:
+  - a partial grant is refused;
+  - sessions reconcile **day by day** with the source, including zero days;
+  - revenue, the channel breakdown (summing to the total) and engagement rate from aggregates all reconcile;
+  - pre-window data is unavailable;
+  - a 503 is retried;
+  - token refresh happens once, and revocation leads to "Reconnect needed".
+- Search Console:
+  - clicks reconcile;
+  - omitted and not-yet-final days are unavailable, not zero;
+  - weighted average position is exact;
+  - the query breakdown plus "(other / anonymized)" equals the total;
+  - re-sync is idempotent.
+- Google Ads:
+  - an unapproved token is explained;
+  - manager-linked accounts sync only with `login-customer-id`;
+  - spend reconciles per day, including paused (zero) days;
+  - campaign clicks and ROAS reconcile;
+  - disconnect revokes the grant and removes the data.
+- HubSpot:
+  - all CRM metrics and breakdowns reconcile with the source records;
+  - the open-pipeline snapshot includes deals created long before the import window;
+  - stored payloads contain no personal data;
+  - the search-window restart is exercised;
+  - forged, stale and duplicate webhooks are rejected or ignored, and a deal-won webhook updates won counts and the pipeline;
+  - incremental syncs fetch only changes and are idempotent;
+  - token refresh and revoke-on-disconnect work.
+- Browser walkthrough: GA4 consent → choose a property → import → Active, then HubSpot the same way, then the Command Center showing imported GA4 and HubSpot figures with source labels.
+- 52 server tests in total pass.
+
+**Simulated / not verified live**
+- No real Google or HubSpot accounts were available here. All four connectors were exercised against local stand-ins of the documented endpoints, so **live verification against real accounts is still required**. Exact GA4 field names are validated at runtime against each property's metadata for this reason.
+
+**External setup required**
+1. **Google Cloud**:
+   - one OAuth client (Web application) with redirect URIs `<API_URL>/api/oauth/{ga4,gsc,google_ads}/callback`;
+   - enable the Analytics Data, Analytics Admin, Search Console and Google Ads APIs;
+   - set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`;
+   - **OAuth app verification** for the sensitive scopes before external users can connect (test users work meanwhile).
+2. **Google Ads**: a developer token from a manager account's API Center with **Basic/Standard access approved by Google** → `GOOGLE_ADS_DEVELOPER_TOKEN`.
+3. **HubSpot**:
+   - a public app with redirect URL `<API_URL>/api/oauth/hubspot/callback` and the scopes `oauth crm.objects.contacts.read crm.objects.deals.read`;
+   - set `HUBSPOT_CLIENT_ID` and `HUBSPOT_CLIENT_SECRET`;
+   - optionally, webhook subscriptions pointing at `<API_URL>/api/webhooks/hubspot`.

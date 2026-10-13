@@ -105,3 +105,16 @@ export async function providerFetch<T = any>(url: string, opts: RequestOptions):
   }
   throw lastErr ?? new ProviderError("transient", `${provider} request failed`);
 }
+
+/**
+ * Test hook: route a provider URL to a local stand-in when `<KEY>` is set
+ * (e.g. GOOGLE_BASE_URL_OVERRIDE=http://127.0.0.1:9000 →
+ * https://oauth2.googleapis.com/token becomes http://127.0.0.1:9000/oauth2.googleapis.com/token).
+ * Always ignored in production.
+ */
+export function providerUrl(url: string, overrideEnv: string): string {
+  const override = process.env[overrideEnv];
+  if (!override || process.env.NODE_ENV === "production") return url;
+  const u = new URL(url);
+  return `${override.replace(/\/$/, "")}/${u.host}${u.pathname}${u.search}`;
+}

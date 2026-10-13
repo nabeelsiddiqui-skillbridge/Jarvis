@@ -193,7 +193,7 @@ function ConnectionCard({ c, manage, onChooseAssets, onReconnect }: { c: Connect
         </div>
       )}
 
-      <dl className="grid grid-cols-[130px_1fr] gap-x-3 gap-y-1.5 text-sm">
+      <dl className="grid grid-cols-[130px_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-sm [&_dd]:min-w-0 [&_dd]:break-words">
         <dt className="text-subtle">Accounts synced</dt>
         <dd>{selected.length ? selected.map((a) => `${a.name}${a.currency ? ` (${a.currency})` : ""}`).join(", ") : <span className="text-warning">None selected</span>}</dd>
         <dt className="text-subtle">Last successful sync</dt>
@@ -209,7 +209,7 @@ function ConnectionCard({ c, manage, onChooseAssets, onReconnect }: { c: Connect
         </dd>
         <dt className="text-subtle">Permissions</dt>
         <dd className="flex flex-wrap gap-1">
-          {c.scopes.length ? c.scopes.map((s) => <Badge key={s} icon={<ShieldCheck className="size-3" />}>{s}</Badge>) : <span className="text-muted">—</span>}
+          {c.scopes.length ? c.scopes.map((s) => <Badge key={s} icon={<ShieldCheck className="size-3" />} title={s}>{shortScope(s)}</Badge>) : <span className="text-muted">—</span>}
           {missingScopes.length > 0 && <span className="w-full text-xs text-warning">Missing: {missingScopes.map((s) => s.scope).join(", ")} — reconnect to grant.</span>}
         </dd>
         <dt className="text-subtle">Live updates</dt>
@@ -273,7 +273,7 @@ function ConnectDialog({ entry, onClose, reconnectId }: { entry: CatalogEntry | 
           <p className="mb-2 font-medium">Permissions requested (read-only)</p>
           <ul className="space-y-1.5">
             {entry.scopes.map((s) => (
-              <li key={s.scope} className="flex gap-2"><ShieldCheck className="mt-0.5 size-4 shrink-0 text-accent" /><span><code className="text-xs text-fg">{s.scope}</code> — <span className="text-muted">{s.reason}{s.optional ? " (optional)" : ""}</span></span></li>
+              <li key={s.scope} className="flex gap-2"><ShieldCheck className="mt-0.5 size-4 shrink-0 text-accent" /><span><code className="break-all text-xs text-fg">{shortScope(s.scope)}</code> — <span className="text-muted">{s.reason}{s.optional ? " (optional)" : ""}</span></span></li>
             ))}
           </ul>
         </div>
@@ -397,3 +397,6 @@ function HistoryDialog({ open, onClose, c }: { open: boolean; onClose: () => voi
     </Dialog>
   );
 }
+
+/** Google scopes are URLs; show their last segment (full value in the tooltip). */
+const shortScope = (s: string) => s.replace(/^https:\/\/www\.googleapis\.com\/auth\//, "");

@@ -20,7 +20,7 @@ export function Delta({ result, className }: { result: QueryResult; className?: 
   return (
     <span className={cn("inline-flex items-center gap-1 text-xs font-medium", good == null ? "text-muted" : good ? "text-success" : "text-danger", className)}>
       <Icon className="size-3.5" aria-hidden />
-      <span>{up ? "+" : ""}{result.change.toFixed(Math.abs(result.change) < 10 ? 1 : 0)}%</span>
+      <span>{flat ? "0.0" : `${up ? "+" : ""}${result.change.toFixed(Math.abs(result.change) < 10 ? 1 : 0)}`}%</span>
       <span className="font-normal text-subtle">vs prev.</span>
       <span className="sr-only">{good == null ? "unchanged" : good ? "(improvement)" : "(decline)"}</span>
     </span>

@@ -1,12 +1,16 @@
 import type { CatalogStatus, ConnectorDefinition } from "./types.js";
 import { shopify } from "./shopify/index.js";
+import { ga4 } from "./google/ga4.js";
+import { gsc } from "./google/gsc.js";
+import { googleAds } from "./google/ads.js";
+import { hubspot } from "./hubspot/index.js";
 
 /**
  * Connector catalog. Implemented connectors carry full definitions; planned ones
  * are listed so users can see the roadmap, and are always shown as "Planned" —
  * never as working integrations.
  */
-export const IMPLEMENTED: ConnectorDefinition[] = [shopify];
+export const IMPLEMENTED: ConnectorDefinition[] = [shopify, ga4, gsc, googleAds, hubspot];
 
 interface PlannedEntry {
   id: string;
@@ -18,11 +22,6 @@ interface PlannedEntry {
 }
 
 const PLANNED: PlannedEntry[] = [
-  { id: "ga4", name: "Google Analytics 4", category: "Analytics", description: "Sessions, users, engagement, key events and ecommerce funnel.", stage: 4 },
-  { id: "gsc", name: "Google Search Console", category: "Search", description: "Organic clicks, impressions, CTR, position by query and page.", stage: 4 },
-  { id: "google_ads", name: "Google Ads", category: "Advertising", description: "Spend, clicks, conversions and conversion value by campaign.", stage: 4,
-    accessRequirements: ["A Google Ads developer token with Basic or Standard access (approved by Google)."] },
-  { id: "hubspot", name: "HubSpot", category: "CRM", description: "Contacts, qualified leads, deals, pipeline and won value.", stage: 4 },
   { id: "meta_ads", name: "Meta Ads", category: "Advertising", description: "Facebook & Instagram ad spend and results.", accessRequirements: ["Meta app review for ads_read."] },
   { id: "facebook_pages", name: "Facebook Pages", category: "Social", description: "Page reach, engagement and followers." },
   { id: "instagram", name: "Instagram (professional)", category: "Social", description: "Reach, engagement and follower growth." },
