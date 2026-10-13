@@ -9,6 +9,7 @@ import { Badge, DemoBadge } from "@/components/ui/Badge";
 import { BusinessAvatar, UserAvatar } from "@/components/ui/Avatar";
 import { IconButton } from "@/components/ui/Button";
 import { Popover } from "@/components/ui/Popover";
+import { NotificationBell } from "./NotificationBell";
 
 export function TopBar({ business, title, workspaceId, onMenu, assistantOpen, onToggleAssistant, showAssistantToggle = true }: {
   business: Business | null;
@@ -31,7 +32,7 @@ export function TopBar({ business, title, workspaceId, onMenu, assistantOpen, on
   };
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-3 border-b border-line bg-bg/80 px-3 backdrop-blur-xl sm:px-5">
+    <header className="no-print sticky top-0 z-30 flex h-16 shrink-0 items-center gap-3 border-b border-line bg-bg/80 px-3 backdrop-blur-xl sm:px-5">
       <IconButton label="Open navigation" className="lg:hidden" onClick={onMenu}>
         <Menu className="size-5" />
       </IconButton>
@@ -65,6 +66,7 @@ export function TopBar({ business, title, workspaceId, onMenu, assistantOpen, on
             <Bot className="size-5" />
           </Link>
         )}
+        <NotificationBell />
         <div className="relative">
           <button ref={menuRef} aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)} className="flex items-center gap-2 rounded-lg p-1.5 hover:bg-white/5">
             <UserAvatar name={me.data?.user.name ?? "?"} size={30} />

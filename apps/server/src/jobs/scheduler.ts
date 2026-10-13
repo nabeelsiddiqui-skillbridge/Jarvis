@@ -1,6 +1,7 @@
 import { pool } from "../db/pool.js";
 import { getConnector } from "../connectors/registry.js";
 import { enqueue, recoverStuck } from "./queue.js";
+import { scheduleAutomations } from "../automations/engine.js";
 
 /**
  * Periodic work, safe to run from several workers (dedupe keys collapse duplicates):
@@ -11,6 +12,14 @@ import { enqueue, recoverStuck } from "./queue.js";
  */
 export async function scheduleDueWork() {
   await recoverStuck();
+  await scheduleAutomations();
+  // Daily insight detection for businesses with data (also runs after each sync).
+  const due = await pool.query(
+    `SELECT b.id, b.workspace_id FROM businesses b
+      WHERE b.archived_at IS NULL AND EXISTS (SELECT 1 FROM connections c WHERE c.business_id = b.id AND c.disconnected_at IS NULL)
+        AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.business_id = b.id AND j.type = 'insights.detect' AND j.created_at > now() - interval '20 hours')`,
+  );
+  for (const b of due.rows) await enqueue(pool, { type: "insights.detect", workspaceId: b.workspace_id, businessId: b.id, dedupeKey: `detect:${b.id}`, priority: -1 });
   const { rows } = await pool.query(
     `SELECT id, workspace_id, business_id, provider, last_success_at, last_sync_started_at, status, settings
        FROM connections WHERE disconnected_at IS NULL AND NOT is_demo AND status IN ('active', 'error', 'syncing')`,

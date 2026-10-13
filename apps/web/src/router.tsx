@@ -19,6 +19,9 @@ import { WorkspaceSettings } from "./pages/app/WorkspaceSettings";
 import { Account } from "./pages/app/Account";
 import { StagePlaceholder } from "./pages/app/StagePlaceholder";
 import { Assistant } from "./pages/app/Assistant";
+import { Insights } from "./pages/app/Insights";
+import { Automations } from "./pages/app/Automations";
+import { ReportView, Reports } from "./pages/app/Reports";
 import { NotFound } from "./pages/NotFound";
 
 export const router = createBrowserRouter([
@@ -44,9 +47,10 @@ export const router = createBrowserRouter([
           { path: "dashboards", element: <Dashboards /> },
           { path: "dashboards/:dashboardId", element: <DashboardView /> },
           { path: "connections", element: <Connections /> },
-          { path: "insights", element: <StagePlaceholder area="Insights" stage={7} /> },
-          { path: "automations", element: <StagePlaceholder area="Automations" stage={7} /> },
-          { path: "reports", element: <StagePlaceholder area="Reports" stage={7} /> },
+          { path: "insights", element: <Insights /> },
+          { path: "automations", element: <Automations /> },
+          { path: "reports", element: <Reports /> },
+          { path: "reports/:reportId", element: <ReportView /> },
           { path: "settings", element: <BusinessSettings /> },
         ],
       },

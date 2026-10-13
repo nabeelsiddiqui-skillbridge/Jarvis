@@ -10,6 +10,9 @@ import { badRequest, forbidden, notFound } from "../lib/errors.js";
 import { availableBaseMetrics, loadAvailability } from "../metrics/engine.js";
 import { getDashboard, getVersionSpec, listDashboards, listVersions, saveDashboard, saveNewDashboard } from "../dashboards/store.js";
 import { createDemoBusiness } from "../demo/generate.js";
+import { runDetection } from "../jobs/handlers.js";
+import { enqueue } from "../jobs/queue.js";
+import { nextRunAt } from "../automations/schedule.js";
 
 export const dashboardsRouter = Router();
 dashboardsRouter.use(requireUser);
@@ -191,5 +194,21 @@ dashboardsRouter.post("/workspaces/:workspaceId/demo-business", async (req, res)
   await inWorkspace(req, req.params.workspaceId, "business.create", async () => undefined);
   // Demo seeding writes connections/facts, which only system code paths may do.
   const out = await withSystem((db) => createDemoBusiness(db, String(req.params.workspaceId), req.user!.id, body.currency ?? "USD", body.timezone ?? "America/New_York"));
+  // Demo extras (labelled demo): insights from the sample data, two automations, and a first briefing.
+  await withSystem(async (db) => {
+    const business = (await db.query(`SELECT * FROM businesses WHERE id = $1`, [out.businessId])).rows[0];
+    await runDetection(db, business);
+    const tz = business.timezone;
+    for (const a of [
+      { name: "Daily briefing", kind: "daily_briefing", trigger: { type: "schedule", frequency: "daily", hour: 8, minute: 0, weekday: 1 } },
+      { name: "Connection failure alerts", kind: "connection_alert", trigger: { type: "event", event: "connection_failed" } },
+    ]) {
+      await db.query(
+        `INSERT INTO automations (id, workspace_id, business_id, name, kind, enabled, trigger, timezone, next_run_at, created_by) VALUES ($1, $2, $3, $4, $5, true, $6, $7, $8, $9)`,
+        [randomUUID(), business.workspace_id, business.id, a.name, a.kind, JSON.stringify(a.trigger), tz, nextRunAt(a.trigger as any, tz), req.user!.id],
+      );
+    }
+    await enqueue(db, { type: "report.generate", workspaceId: business.workspace_id, businessId: business.id, payload: { kind: "daily_briefing", userId: req.user!.id }, dedupeKey: `report:${business.id}:demo` });
+  });
   res.status(201).json({ id: out.businessId });
 });

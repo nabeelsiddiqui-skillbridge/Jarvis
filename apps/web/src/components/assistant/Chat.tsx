@@ -32,20 +32,22 @@ const SUGGESTIONS = [
  * The conversation UI shared by the side panel and the Assistant page. Replies
  * stream in; every figure links to the evidence it came from.
  */
-export function Chat({ business, conversationId, onConversation, onMissing, compact }: {
+export function Chat({ business, conversationId, onConversation, onMissing, compact, initialDraft }: {
   business: Business;
   conversationId: string | null;
   onConversation: (id: string) => void;
   /** The selected conversation no longer exists (deleted elsewhere). */
   onMissing?: () => void;
   compact?: boolean;
+  /** Pre-filled question (e.g. from a suggested question link). */
+  initialDraft?: string;
 }) {
   const status = useAssistantStatus(business.id);
   const conv = useConversation(business.id, conversationId);
   const qc = useQueryClient();
   const [pending, setPending] = useState<Pending | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useState(initialDraft ?? "");
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const busy = Boolean(pending);
@@ -91,7 +93,7 @@ export function Chat({ business, conversationId, onConversation, onMissing, comp
       await streamMessage(business.id, id, text, (e) => {
         if (e.type === "start") setPending((p) => p && { ...p, user: e.userMessage });
         else if (e.type === "text") { setPending((p) => p && { ...p, text: p.text + e.delta }); if (opts.voice) voice.feed(e.delta); }
-        else if (e.type === "step") setPending((p) => p && { ...p, steps: [...p.steps.filter((s) => s.id !== e.step.id), { ...e.step, done: e.done }] });
+        else if (e.type === "step") { setPending((p) => p && { ...p, steps: [...p.steps.filter((s) => s.id !== e.step.id), { ...e.step, done: e.done }] }); if (opts.voice) voice.step(!e.done); }
         else if (e.type === "evidence") setPending((p) => p && { ...p, evidence: [...p.evidence, e.evidence] });
         else if (e.type === "proposal") setPending((p) => p && { ...p, proposals: [...p.proposals, e.proposal] });
         else if (e.type === "error") setError(e.message);
@@ -160,7 +162,7 @@ export function Chat({ business, conversationId, onConversation, onMissing, comp
       </div>
       <VoiceBar voice={voice} compact={compact} />
       <Composer value={draft} onChange={setDraft} onSend={() => send(draft)} onStop={() => { abortRef.current?.abort(); }} busy={busy} disabled={configured === false} compact={compact} businessName={business.name}
-        onVoice={voice.state === "off" || voice.state === "error" ? () => voice.start() : undefined} />
+        onVoice={voice.state === "off" ? () => voice.start() : undefined} />
     </div>
   );
 }

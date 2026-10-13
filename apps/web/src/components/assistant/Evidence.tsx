@@ -44,12 +44,12 @@ export function EvidenceCard({ evidence, highlighted }: { evidence: Evidence; hi
 
 function Header({ id, title, extra }: { id: string; title: string; extra?: React.ReactNode }) {
   return (
-    <div className="flex items-start justify-between gap-2">
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="rounded-md border border-accent/40 bg-accent/10 px-1.5 text-[11px] font-semibold text-accent">{id}</span>
-        <span className="truncate font-medium text-fg">{title}</span>
+    <div className="flex flex-wrap items-start justify-between gap-2">
+      <div className="flex min-w-0 flex-1 items-start gap-2">
+        <span className="mt-px shrink-0 rounded-md border border-accent/40 bg-accent/10 px-1.5 text-[11px] font-semibold text-accent">{id}</span>
+        <span className="min-w-[8rem] font-medium text-fg">{title}</span>
       </div>
-      <div className="flex shrink-0 items-center gap-1">{extra}</div>
+      <div className="flex shrink-0 flex-wrap items-center gap-1">{extra}</div>
     </div>
   );
 }

@@ -7,6 +7,12 @@ import { ProviderError } from "../connectors/http.js";
 import { getConnector } from "../connectors/registry.js";
 import type { AssetRow, ConnectionRow, ConnectorDefinition, SyncContext } from "../connectors/types.js";
 import { complete, enqueue, fail, type Job } from "./queue.js";
+import { detectInsights } from "../insights/detect.js";
+import { upsertInsights } from "../insights/store.js";
+import { explainInsight } from "../insights/explain.js";
+import { aiConfigured } from "../ai/complete.js";
+import { executeRun, fireEvent, markRunFailed } from "../automations/engine.js";
+import { buildReport, reportPeriod, saveReport, type ReportKind } from "../reports/build.js";
 
 async function loadConnection(db: pg.PoolClient, id: string): Promise<ConnectionRow | null> {
   const { rows } = await db.query(`SELECT * FROM connections WHERE id = $1 AND disconnected_at IS NULL`, [id]);
@@ -49,6 +55,8 @@ async function recordFailure(db: pg.PoolClient, job: Job, connection: Connection
   );
   if (outcome === "failed" || status) {
     await audit(db, { workspaceId: connection.workspace_id, businessId: connection.business_id, actorType: "system", action: "connection.sync_failed", targetType: "connection", targetId: connection.id, metadata: { kind, message } });
+    const newStatus = status ?? "error";
+    await fireEvent(db, connection.business_id, "connection_failed", { connectionId: connection.id, provider: connection.provider, name: connection.display_name, status: newStatus, error: message }, `${connection.id}:${newStatus}:${new Date().toISOString().slice(0, 10)}`);
   }
   await notify(db, connection.business_id, "connection_updated", { connectionId: connection.id });
 }
@@ -65,6 +73,14 @@ export async function runJob(job: Job) {
         return await healthJob(db, job);
       case "connection.register_webhooks":
         return await registerWebhooksJob(db, job);
+      case "insights.detect":
+        return await detectJob(db, job);
+      case "insight.explain":
+        return await explainJob(db, job);
+      case "automation.run":
+        return await automationJob(db, job);
+      case "report.generate":
+        return await reportJob(db, job);
       default:
         await fail(db, job, `Unknown job type ${job.type}`, { retryable: false });
     }
@@ -94,6 +110,8 @@ async function syncJob(db: pg.PoolClient, job: Job) {
     await complete(db, job.id, { mode, results });
     await notify(db, connection.business_id, "data_updated", { connectionId: connection.id });
     await notify(db, connection.business_id, "connection_updated", { connectionId: connection.id });
+    // Re-check insights shortly after new data lands (collapsed across several syncs).
+    await enqueue(db, { type: "insights.detect", workspaceId: connection.workspace_id, businessId: connection.business_id, dedupeKey: `detect:${connection.business_id}`, runAt: new Date(Date.now() + 2 * 60_000), priority: -1 });
     if (mode === "initial") {
       await audit(db, { workspaceId: connection.workspace_id, businessId: connection.business_id, actorType: "system", action: "connection.initial_sync_completed", targetType: "connection", targetId: connection.id, metadata: { results } });
       if (def.registerWebhooks) await enqueue(db, { type: "connection.register_webhooks", workspaceId: connection.workspace_id, businessId: connection.business_id, connectionId: connection.id, dedupeKey: `hooks:${connection.id}` });
@@ -159,5 +177,76 @@ async function registerWebhooksJob(db: pg.PoolClient, job: Job) {
     await complete(db, job.id, { topics, note: topics.length ? undefined : "Webhooks need a public HTTPS API_URL; using scheduled syncs instead." });
   } catch (err) {
     await recordFailure(db, job, connection, err);
+  }
+}
+
+
+// ------------------------------------------------------------------ insights, automations, reports
+
+/** Detect, store, notify, trigger insight automations and queue AI explanations. Used by the job and "Run now". */
+export async function runDetection(db: pg.PoolClient, business: any) {
+  const found = await detectInsights(db, business);
+  const { created, resolved } = await upsertInsights(db, business, found);
+  if (created.length) {
+    await notify(db, business.id, "insight_created", { count: created.length });
+    await fireEvent(db, business.id, "insights_detected", { insightIds: created }, `insights:${created.slice().sort().join(",").slice(0, 200)}`);
+    if (aiConfigured()) {
+      const worth = (await db.query(`SELECT id FROM insights WHERE id = ANY($1::uuid[]) AND severity IN ('critical', 'warning', 'positive') ORDER BY detected_at LIMIT 5`, [created])).rows;
+      for (const i of worth) {
+        await db.query(`UPDATE insights SET explanation_status = 'pending' WHERE id = $1`, [i.id]);
+        await enqueue(db, { type: "insight.explain", workspaceId: business.workspace_id, businessId: business.id, payload: { insightId: i.id }, dedupeKey: `explain:${i.id}`, maxAttempts: 3, priority: -2 });
+      }
+    }
+  }
+  return { candidates: found.length, created: created.length, resolved };
+}
+
+async function detectJob(db: pg.PoolClient, job: Job) {
+  const business = (await db.query(`SELECT * FROM businesses WHERE id = $1 AND archived_at IS NULL`, [job.business_id])).rows[0];
+  if (!business) return complete(db, job.id, { skipped: "business removed" });
+  try {
+    await complete(db, job.id, await runDetection(db, business));
+  } catch (err) {
+    console.error(`[job ${job.id}] detection failed`, err);
+    await fail(db, job, (err as Error).message, { retryable: true });
+  }
+}
+
+async function explainJob(db: pg.PoolClient, job: Job) {
+  try {
+    await explainInsight(db, job.payload.insightId);
+    await notify(db, job.business_id!, "insight_created", {});
+    await complete(db, job.id, {});
+  } catch (err) {
+    const retryable = !(err as any)?.status || (err as any).status >= 429;
+    const outcome = await fail(db, job, (err as Error).message, { retryable });
+    if (outcome === "retrying") await db.query(`UPDATE insights SET explanation_status = 'pending' WHERE id = $1`, [job.payload.insightId]);
+  }
+}
+
+async function automationJob(db: pg.PoolClient, job: Job) {
+  try {
+    const r = await executeRun(db, job.payload.runId, job.attempts);
+    await complete(db, job.id, r);
+  } catch (err) {
+    console.error(`[job ${job.id}] automation run failed`, err);
+    const outcome = await fail(db, job, (err as Error).message, { retryable: true });
+    await markRunFailed(db, job.payload.runId, (err as Error).message || "Failed", outcome === "failed");
+  }
+}
+
+/** On-demand report ("Generate now"). */
+async function reportJob(db: pg.PoolClient, job: Job) {
+  const business = (await db.query(`SELECT * FROM businesses WHERE id = $1 AND archived_at IS NULL`, [job.business_id])).rows[0];
+  if (!business) return complete(db, job.id, { skipped: "business removed" });
+  try {
+    const kind = job.payload.kind as ReportKind;
+    const { period, label } = reportPeriod(kind, business.timezone, job.payload.period);
+    const built = await buildReport(db, business, kind, period, label);
+    const reportId = await saveReport(db, business, kind, period, built, { createdBy: job.payload.userId ?? null });
+    await complete(db, job.id, { reportId });
+  } catch (err) {
+    console.error(`[job ${job.id}] report failed`, err);
+    await fail(db, job, (err as Error).message, { retryable: true });
   }
 }

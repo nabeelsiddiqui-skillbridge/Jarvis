@@ -36,7 +36,7 @@ function AppShell({ workspaceId, business, navBusiness = business, title, childr
     <div className="flex h-dvh overflow-hidden">
       <a href="#main" className="sr-only z-[70] rounded-md bg-accent px-3 py-2 text-[#04121a] focus:not-sr-only focus:fixed focus:left-3 focus:top-3">Skip to content</a>
 
-      <aside className="hidden w-[272px] shrink-0 border-r border-line bg-panel-2/70 lg:block">
+      <aside className="no-print hidden w-[272px] shrink-0 border-r border-line bg-panel-2/70 lg:block">
         <Sidebar workspaceId={workspaceId} business={navBusiness} />
       </aside>
 

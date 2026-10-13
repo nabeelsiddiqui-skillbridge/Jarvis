@@ -18,6 +18,7 @@ export function Assistant() {
   const b = useBusiness();
   const [params, setParams] = useSearchParams();
   const conversationId = params.get("c");
+  const [initialQuestion] = useState(() => params.get("q") ?? undefined);
   const [historyOpen, setHistoryOpen] = useState(false);
   const select = (id: string | null) => { setParams(id ? { c: id } : {}, { replace: !id }); setHistoryOpen(false); };
 
@@ -34,7 +35,7 @@ export function Assistant() {
             <IconButton label="New conversation" size="sm" onClick={() => select(null)}><SquarePen className="size-4" /></IconButton>
           </div>
         </div>
-        <Chat key={b.id} business={b} conversationId={conversationId} onConversation={(id) => setParams({ c: id }, { replace: true })} onMissing={() => select(null)} />
+        <Chat key={b.id} business={b} conversationId={conversationId} initialDraft={initialQuestion} onConversation={(id) => setParams({ c: id }, { replace: true })} onMissing={() => select(null)} />
       </section>
       <Dialog open={historyOpen} onClose={() => setHistoryOpen(false)} title="Conversations">
         <div className="-mx-2 max-h-[60vh] overflow-y-auto"><ConversationList current={conversationId} onSelect={select} /></div>

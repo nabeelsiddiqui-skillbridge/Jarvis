@@ -281,3 +281,73 @@ Status of each stage of the build plan: what works, what is simulated, and what 
 - `DEEPGRAM_API_KEY` (Member permission or higher) for streaming voice. Optionally `VOICE_STT_MODEL`, `VOICE_TTS_MODEL`, `VOICE_LANGUAGE` and `VOICE_WS_AUTH_SCHEME`.
 - Voice also requires `ANTHROPIC_API_KEY`.
 - The site must be served over HTTPS in production for microphone access.
+
+## Stage 7 — Briefings, insights and automations ✅
+
+**Works**
+- **Insights** (`apps/server/src/insights/`). Numeric findings come from **deterministic rules** over the metric engine, using complete, fully covered periods only:
+  - **period change**: last 7 complete days vs the previous 7. Requires at least 15% change plus minimum volume; ratios need enough underlying volume, and lumpy totals such as won deal value need at least 5 won deals.
+  - **anomaly**: yesterday at least 3 standard deviations and at least 30% away from the trailing 28-day daily average.
+  - **goal pacing** against user-confirmed goals, using complete days only.
+  - **data health**: failing, disconnected or stale connections. These resolve automatically when the connection recovers.
+- Each insight carries the **finding, evidence** (the same evidence cards as the assistant), **reporting period** and comparison, **severity**, **possible impact** (for example "about $2,100 less than the previous 7 days"), the **largest contributors** by dimension, a **suggested next step**, and a **supporting dashboard link**.
+- Re-detection updates an insight in place instead of duplicating it; dismissed findings stay closed. Detection runs daily, about 2 minutes after each sync (collapsed across syncs), and on "Check now".
+- **AI explanations** are a separate, optional step: two or three *possible* causes, generated only from the insight's own evidence. They're labelled "possible causes, not verified" and retried on failure.
+- **Tasks**: create from an insight or manually, assign, add a due date, mark done. Assignees can complete their own tasks; editing other details needs the analyst role or above.
+- **Automation builder** (`/automations`) covering trigger (schedule or event), conditions, business and account scope, actions, schedule and timezone, approval policy and run history. Types:
+  - **daily briefing** and **weekly report**;
+  - **threshold alert** (above or below a value, or up or down by a %; evaluated only over complete data);
+  - **connection failure alert**;
+  - **tasks from new insights**, at a chosen minimum severity.
+- **Execution**:
+  - Each occurrence gets exactly one run (unique automation and slot or event key), so a double "Run now" or a repeated event can't duplicate it.
+  - Runs execute in worker jobs with retries and backoff. A final failure notifies administrators and can be retried from run history.
+  - Notifications and tasks are de-duplicated; email is sent at most once per run.
+  - Schedules keep local wall-clock time across daylight-saving changes.
+- **Approval policy**: "require approval" prepares everything (reports are still created), then holds notifications, emails and tasks until an administrator approves. Permission is re-checked on the server, and the decision is claimed atomically so two approvers can't both execute it.
+- **Reports and briefings** (`/reports`):
+  - Headline KPIs for the business type, with evidence and comparisons; biggest movers; open insights; goals; data health; limitations.
+  - A deterministic summary is always included, with an optional AI summary citing evidence ids ([R1]).
+  - Generate now (daily, weekly, or a custom period), print or save as PDF, and **CSV export** (needs the export permission, is audited, and neutralises formulas).
+- **Command Center**:
+  - The **daily briefing card** shows the latest briefing with citations, or generate or schedule one.
+  - **Active alerts** shows critical and warning insights.
+- **AI commentary widget** on dashboards summarizes the dashboard's own widgets with citations. It's cached per dashboard version, date range and data freshness.
+- **In-app notifications** (bell in the top bar, across businesses, private per user) for briefings, alerts, approvals and failures, with live updates. **Email** is used when SMTP is configured; otherwise each run records that email was skipped.
+- The **demo business** now opens with detected insights, a daily briefing automation, connection alerts and a first briefing, all labelled demo.
+- **Voice additions from the spec**:
+  - mute, optional continuous conversation (or click-to-talk);
+  - separate "retrieving" and "analyzing" states;
+  - a spoken "One moment, I'm checking your data" for slow lookups;
+  - a 3-minute silence timeout, one automatic reconnect with a fresh token, and an animated waveform orb (static for reduced motion).
+
+**Verified**
+- `apps/server/test/insights.test.ts` (16 tests), on seeded data with a known shape:
+  - The detected drop matches the exact 7-day totals, the right product is the top contributor, and impact and next step are present.
+  - The anomaly and the AOV change are found.
+  - Re-detection doesn't duplicate, and dismissed findings stay dismissed.
+  - AI explanations are built from evidence only (no tools).
+  - Data-health findings resolve when the connection recovers; goal pacing works.
+  - Isolation across businesses holds.
+  - Automation validation catches the wrong trigger for a kind, unknown metrics and recipients without access; viewers are blocked.
+  - Daily briefing: the next run is 07:30 New York time; a double "Run now" makes one run; the report figures match the data; the notification links to the report.
+  - Approval: the hold works, an analyst can't approve, the owner can, a second approval gets 409, and email is skipped without SMTP.
+  - Threshold alerts: met creates an insight and an assigned task; not met sends nothing. Only the assignee can complete the task.
+  - Connection alerts fire once per event key; insight tasks are de-duplicated.
+  - Custom report: export needs the export permission, the CSV has the right header, formulas are neutralised, and the export is audited.
+  - Commentary caching works; notifications are private and can be marked read.
+  - DST-safe scheduling.
+- Browser walkthrough (desktop and 390px):
+  - Demo → Command Center with an AI briefing and citations → Insights with evidence, contributors and the labelled AI explanation → create task → Tasks.
+  - Automations → threshold alert builder → run now → run history "Alert: Store net sales below $100,000 ($7,361)".
+  - Report view with export and print → notifications → mobile Insights. No console errors.
+  - Fixed along the way: goal pace counted today's partial day; won value is lumpy and needed a volume rule; tabs overflowed on mobile; evidence titles were cramped.
+
+**Simulated / not verified live**
+- AI explanations, briefing summaries and commentary ran against a scripted stand-in model, so their wording quality needs live verification with a real key.
+- Email delivery hasn't been tested against a real SMTP server; it is wired through nodemailer and runs report "skipped" without `SMTP_URL`.
+
+**External setup**
+- Optional `SMTP_URL` and `EMAIL_FROM` for email delivery.
+- `ANTHROPIC_API_KEY` for AI explanations, summaries and commentary. Every finding and figure works without it.
+- The worker process must be running for schedules, detection after syncs and retries.

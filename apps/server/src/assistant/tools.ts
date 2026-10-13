@@ -30,6 +30,7 @@ import { inBusinessAs, type BusinessCtx } from "../auth/access.js";
 import { getDashboard, listDashboards } from "../dashboards/store.js";
 import { availableBaseMetrics, loadAvailability, loadCalcs, runQuery } from "../metrics/engine.js";
 import { PROVIDER_META } from "../metrics/providers.js";
+import { toMetricEvidence } from "../metrics/evidence.js";
 
 /**
  * Assistant tools. All are read-only against business data and run in their own
@@ -153,14 +154,7 @@ const queryMetric = tool({
       if (parsed.data.metric.startsWith("calc:") && !calcs.has(parsed.data.metric.slice(5))) return { isError: true, label: "Unknown calculated metric", result: { error: "Unknown calculated metric" } };
       const r = await runQuery({ db, business, availability: await loadAvailability(db, business), calcs, dashboardRange: { preset: "last_30_days" } }, parsed.data);
       const id = env.nextEvidenceId();
-      const evidence: MetricEvidence = {
-        id, kind: "metric",
-        question: `${r.metric.label}${parsed.data.dimension ? ` by ${DIMENSIONS[parsed.data.dimension].toLowerCase()}` : ""}${parsed.data.granularity !== "none" ? ` per ${parsed.data.granularity}` : ""}`,
-        metric: r.metric, range: r.range, comparisonRange: r.comparisonRange, dimension: parsed.data.dimension, granularity: parsed.data.granularity,
-        availability: r.availability, unavailableReason: r.unavailableReason, total: r.total, comparisonTotal: r.comparisonTotal, change: r.change,
-        comparisonPartial: r.comparisonPartial, rows: r.rows?.map((x) => ({ label: x.label, value: x.value, share: x.share })) ?? null,
-        currency: r.currency, timezone: r.timezone, sources: r.sources, freshness: r.freshness, limitations: r.limitations, isDemo: r.isDemo,
-      };
+      const evidence = toMetricEvidence(id, r, parsed.data);
       const series = r.series?.length ? r.series.slice(-120).map((p) => [p.bucket, round(p.value), round(p.comparison)]) : undefined;
       return {
         label: `Queried ${r.metric.label} (${r.range.from} → ${r.range.to})`,

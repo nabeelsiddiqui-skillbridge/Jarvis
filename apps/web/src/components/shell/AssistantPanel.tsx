@@ -15,7 +15,7 @@ export function AssistantPanel({ business, onClose }: { business: Business; onCl
   const nav = useNavigate();
   const select = (id: string | null) => { setConversationId(id); save(business.id, id); };
   return (
-    <aside aria-label="Assistant" className="hidden w-[400px] shrink-0 flex-col border-l border-line bg-panel-2/60 xl:flex">
+    <aside aria-label="Assistant" className="no-print hidden w-[400px] shrink-0 flex-col border-l border-line bg-panel-2/60 xl:flex">
       <div className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-line px-3">
         <div className="flex min-w-0 items-center gap-2 text-sm font-semibold">
           <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-accent/30 to-violet/30 text-accent"><Bot className="size-4" /></span>

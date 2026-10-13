@@ -16,6 +16,11 @@ import { connectionsRouter, oauthRouter } from "./routes/connections.js";
 import { webhooksRouter } from "./routes/webhooks.js";
 import { assistantRouter } from "./routes/assistant.js";
 import { voiceRouter } from "./routes/voice.js";
+import { insightsRouter } from "./routes/insights.js";
+import { automationsRouter } from "./routes/automations.js";
+import { reportsRouter } from "./routes/reports.js";
+import { notificationsRouter } from "./routes/notifications.js";
+import { commentaryRouter } from "./routes/commentary.js";
 
 export function createApp() {
   const app = express();
@@ -64,6 +69,11 @@ export function createApp() {
   app.use("/api", oauthRouter);
   app.use("/api", assistantRouter);
   app.use("/api", voiceRouter);
+  app.use("/api", insightsRouter);
+  app.use("/api", automationsRouter);
+  app.use("/api", reportsRouter);
+  app.use("/api", notificationsRouter);
+  app.use("/api", commentaryRouter);
 
   app.use("/api", (_req, res) => res.status(404).json({ error: { code: "not_found", message: "Unknown API route." } }));
 

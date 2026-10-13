@@ -10,7 +10,7 @@ const cls = ({ isActive }: { isActive: boolean }) =>
 export function MobileTabBar({ business, workspaceId, onMore }: { business: Business | null; workspaceId: string; onMore: () => void }) {
   const base = business ? `/app/b/${business.id}` : `/app/w/${workspaceId}/businesses`;
   return (
-    <nav aria-label="Quick navigation" className="fixed inset-x-0 bottom-0 z-30 flex border-t border-line bg-panel/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl lg:hidden">
+    <nav aria-label="Quick navigation" className="no-print fixed inset-x-0 bottom-0 z-30 flex border-t border-line bg-panel/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl lg:hidden">
       <NavLink to={base} end className={cls}><Gauge className="size-5" />Command</NavLink>
       <NavLink to={business ? `${base}/assistant` : base} className={cls}><Bot className="size-5" />Assistant</NavLink>
       <NavLink to={business ? `${base}/dashboards` : base} className={cls}><LayoutDashboard className="size-5" />Dashboards</NavLink>

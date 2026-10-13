@@ -85,6 +85,9 @@ export function useBusinessEvents(businessId: string) {
       if (id) qc.invalidateQueries({ queryKey: ["b", businessId, "dashboard", id] });
     });
     es.addEventListener("insight_created", () => qc.invalidateQueries({ queryKey: ["b", businessId, "insights"] }));
+    es.addEventListener("report_created", () => qc.invalidateQueries({ queryKey: ["b", businessId, "reports"] }));
+    es.addEventListener("tasks_updated", () => qc.invalidateQueries({ queryKey: ["b", businessId, "tasks"] }));
+    es.addEventListener("notification", () => qc.invalidateQueries({ queryKey: ["notifications"] }));
     return () => es.close();
   }, [businessId, qc]);
 }

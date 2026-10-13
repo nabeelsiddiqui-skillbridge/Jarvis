@@ -27,6 +27,15 @@ export async function startMockAnthropic(respond: MockAnthropicState["respond"])
     if (req.get("x-api-key") !== process.env.ANTHROPIC_API_KEY) return res.status(401).json({ type: "error", error: { type: "authentication_error", message: "invalid x-api-key" } });
     state.requests.push({ headers: { beta: req.get("anthropic-beta") }, body: structuredClone(req.body) });
     const reply = state.respond(req.body);
+    if (!req.body.stream) {
+      // Non-streaming request: a complete Message object.
+      return res.json({
+        id: `msg_${Math.random().toString(36).slice(2)}`, type: "message", role: "assistant", model: reply.model ?? req.body.model,
+        content: reply.content.map((b) => (b.type === "tool_use" ? { type: "tool_use", id: b.id, name: b.name, input: b.input } : b)),
+        stop_reason: reply.stop_reason, stop_sequence: null,
+        usage: { input_tokens: 100, output_tokens: 42, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      });
+    }
     res.writeHead(200, { "Content-Type": "text/event-stream" });
     const send = (type: string, data: unknown) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...(data as object) })}\n\n`);
     const model = reply.model ?? req.body.model;

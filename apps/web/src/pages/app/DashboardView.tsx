@@ -281,7 +281,7 @@ export function DashboardView() {
         >
           {spec.widgets.map((w) => (
             <div key={w.id}>
-              <Widget widget={w} businessId={b.id} timezone={b.timezone} dashboardRange={range} editing={editing}
+              <Widget widget={w} businessId={b.id} dashboardId={dashboardId} timezone={b.timezone} dashboardRange={range} editing={editing}
                 actions={editing ? (
                   <span className="widget-nodrag flex items-center">
                     <IconButton size="sm" label={`Edit ${w.title}`} onClick={() => setEditor({ open: true, widget: w })}><Pencil className="size-3.5" /></IconButton>

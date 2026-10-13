@@ -1,9 +1,12 @@
-import type { ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState, type ReactNode } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { CheckCircle2, Clock, Sparkles, XCircle } from "lucide-react";
 import { daysBetween, formatMetricValue, resolvePreset, todayIn, type DateRangeSpec, type Goal, type MetricUnit, type WidgetSpec } from "@bca/shared";
-import { get } from "@/lib/api";
+import { errorMessage, get, post } from "@/lib/api";
+import { useCommentary } from "@/lib/insights";
+import { CitationChip, EvidenceCard } from "@/components/assistant/Evidence";
+import { Markdown } from "@/components/assistant/Markdown";
 import { keys } from "@/lib/business";
 import { useCatalog, useMetricQuery } from "@/lib/metrics";
 import { Prerequisite } from "@/components/ui/EmptyState";
@@ -17,6 +20,8 @@ export interface WidgetProps {
   dashboardRange: DateRangeSpec;
   actions?: ReactNode;
   editing?: boolean;
+  /** Set on saved dashboards (used by the commentary widget). */
+  dashboardId?: string;
 }
 
 export function Widget(props: WidgetProps) {
@@ -143,18 +148,40 @@ function FreshnessWidget({ widget, businessId, actions, editing }: WidgetProps) 
   );
 }
 
-function CommentaryWidget({ widget, actions, editing }: WidgetProps) {
+function CommentaryWidget({ widget, actions, editing, businessId, dashboardId, dashboardRange }: WidgetProps) {
+  const q = useCommentary(businessId, dashboardId ?? "none");
+  const qc = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
+  const gen = useMutation({
+    mutationFn: () => post<{ commentary: any; reason?: string }>(`/businesses/${businessId}/dashboards/${dashboardId}/commentary`, { dateRange: dashboardRange }),
+    onSuccess: (r) => { setError(r.reason ?? null); qc.setQueryData(["b", businessId, "dashboard", dashboardId, "commentary"], (old: any) => ({ ...(old ?? {}), commentary: r.commentary ?? old?.commentary ?? null })); },
+    onError: (e) => setError(errorMessage(e)),
+  });
+  const c = q.data?.commentary;
+  const evidence = new Map<string, any>((c?.evidence ?? []).map((e: any) => [e.id, e]));
   return (
     <section className="panel flex h-full flex-col overflow-hidden">
       <header className={`flex items-center gap-2 px-4 pb-1 pt-3 ${editing ? "widget-drag cursor-grab" : ""}`}>
         <Sparkles className="size-4 text-violet" />
         <h3 className="min-w-0 flex-1 truncate text-[13px] font-semibold">{widget.title}</h3>
+        {!editing && dashboardId && q.data?.aiConfigured && (
+          <button type="button" className="widget-nodrag text-xs text-accent hover:underline disabled:opacity-50" disabled={gen.isPending} onClick={() => gen.mutate()}>{gen.isPending ? "Writing…" : c ? "Update" : "Generate"}</button>
+        )}
         {actions}
       </header>
-      <div className="widget-nodrag flex-1 overflow-auto px-4 py-2">
-        <Prerequisite title="Automatic commentary arrives with insights (build stage 7)">
-          This widget will summarize what changed on this dashboard, citing the widgets' data. Until then it shows no text — ask the assistant for an evidence-backed explanation instead.
-        </Prerequisite>
+      <div className="widget-nodrag flex-1 overflow-auto px-4 py-2 text-sm leading-relaxed text-[#dbe4ef]">
+        {!dashboardId ? <Prerequisite title="Save the dashboard first">Commentary summarizes a saved dashboard's widgets.</Prerequisite>
+          : q.isLoading ? <span className="text-xs text-subtle">Loading…</span>
+          : q.data && !q.data.aiConfigured && !c ? <Prerequisite title="AI not configured">AI commentary needs the platform operator to add an AI provider key (ANTHROPIC_API_KEY). Every widget's figures remain available.</Prerequisite>
+          : c ? (
+            <>
+              <Markdown text={c.text} renderCitation={(id, key) => <CitationChip key={key} id={id} active={open === id} missing={!evidence.has(id)} onClick={() => setOpen(open === id ? null : id)} />} />
+              {open && evidence.get(open) && <div className="mt-2"><EvidenceCard evidence={evidence.get(open)} highlighted /></div>}
+              <p className="mt-2 text-[11px] text-subtle">AI-written from this dashboard's widgets · {relativeTime(c.createdAt)}. Check the cited evidence before acting.</p>
+            </>
+          ) : <p className="text-xs text-muted">Generate a short summary of what this dashboard's widgets show, with each figure linked to its evidence.</p>}
+        {error && <p className="mt-2 text-xs text-warning">{error}</p>}
       </div>
     </section>
   );
