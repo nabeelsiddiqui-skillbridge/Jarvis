@@ -164,7 +164,7 @@ function NoDataYet() {
         <ButtonLink to="assistant" variant="ghost" icon={<Bot className="size-4" />}>Assistant</ButtonLink>
       </>}>
       KPIs, trends and alerts appear once a source is connected. The demo opens a <b className="text-fg">separate, labelled</b> business with sample data — nothing is added to {b.name}.
-      <div className="mt-4"><Prerequisite title="Connectors arrive in build stage 3">Shopify, GA4, Search Console, Google Ads and HubSpot connections are implemented in stages 3–4.</Prerequisite></div>
+      <div className="mt-4"><Prerequisite title="Available sources">Shopify is available now. GA4, Search Console, Google Ads and HubSpot are delivered in build stage 4.</Prerequisite></div>
     </EmptyState>
   );
 }

@@ -10,7 +10,8 @@ const fmt = (r: QueryResult, v: number | null | undefined, compact = false) => f
 /** Change vs comparison: arrow + signed % + "vs previous period"; never color alone. */
 export function Delta({ result, className }: { result: QueryResult; className?: string }) {
   if (result.change == null) {
-    return <span className={cn("text-xs text-subtle", className)}>{result.comparisonRange ? "No comparison data" : ""}</span>;
+    const why = !result.comparisonRange ? "" : result.comparisonPartial ? "Prior period incomplete" : result.comparisonTotal === 0 ? "Prior period was 0" : "No comparison data";
+    return <span className={cn("text-xs text-subtle", className)}>{why}</span>;
   }
   const up = result.change > 0;
   const flat = Math.abs(result.change) < 0.05;
@@ -54,7 +55,7 @@ export function KpiView({ result, widget }: { result: QueryResult; widget: Widge
       <div>
         <p className="font-display text-[28px] font-semibold leading-tight tracking-tight tabular-nums">{fmt(result, result.total)}</p>
         {widget.options.showComparison !== false && <Delta result={result} />}
-        {result.comparisonTotal != null && widget.options.showComparison !== false && (
+        {result.comparisonTotal != null && !result.comparisonPartial && widget.options.showComparison !== false && (
           <p className="text-[11px] text-subtle">Previous: {fmt(result, result.comparisonTotal)}</p>
         )}
       </div>

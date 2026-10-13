@@ -249,6 +249,7 @@ export async function runQuery(ctx: QueryContext, q: WidgetQuery): Promise<Query
     total: null,
     comparisonTotal: null,
     change: null,
+    comparisonPartial: false,
     series: null,
     rows: null,
     steps: null,
@@ -359,11 +360,12 @@ export async function runQuery(ctx: QueryContext, q: WidgetQuery): Promise<Query
       result.comparisonTotal = target.eval(aggregate(cmpDays, target.deps));
     } else if (cmpDays.length) {
       result.comparisonTotal = target.eval(aggregate(cmpDays, target.deps));
-      limitations.push(`The comparison period is only partly covered (${cmpDays.length} of ${daysBetween(cmpRange.from, cmpRange.to)} days).`);
+      result.comparisonPartial = true;
+      limitations.push(`The comparison period is only partly covered (${cmpDays.length} of ${daysBetween(cmpRange.from, cmpRange.to)} days), so no % change is shown.`);
     } else {
       limitations.push("No data for the comparison period.");
     }
-    if (result.total != null && result.comparisonTotal != null && result.comparisonTotal !== 0) {
+    if (!result.comparisonPartial && result.total != null && result.comparisonTotal != null && result.comparisonTotal !== 0) {
       result.change = ((result.total - result.comparisonTotal) / Math.abs(result.comparisonTotal)) * 100;
     }
   }

@@ -135,12 +135,25 @@ export function Onboarding() {
             </div>
           )}
 
-          {step >= 3 && (
+          {step === 3 && (
+            <div className="space-y-5">
+              <div>
+                <h1 className="text-2xl font-semibold">Connect your first data source</h1>
+                <p className="mt-1 text-sm text-muted">You'll approve read-only access on the provider's own sign-in page, choose which store or account to sync, and the first import runs in the background. You can skip this and connect later from Connections.</p>
+              </div>
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button variant="ghost" onClick={() => setStep(4)}>Skip for now</Button>
+                <Button variant="primary" onClick={async () => { await patch("/auth/me/preferences", { onboarding: { completed: true } }).catch(() => undefined); nav(`/app/b/${businessId}/connections`, { replace: true }); }}>Choose a source <ArrowRight className="size-4" /></Button>
+              </div>
+            </div>
+          )}
+
+          {step >= 4 && (
             <div className="space-y-5">
               <h1 className="text-2xl font-semibold">You're set up</h1>
               <p className="text-sm text-muted">
-                Your workspace and business are ready. Connecting data sources, building your first dashboard and asking your first question
-                become available as those parts of the product are delivered; the Command Center shows your remaining setup steps.
+                Your workspace and business are ready. Connect data whenever you like; dashboards and the assistant use only the sources you connect.
+                The Command Center lists what's left to set up.
               </p>
               <div className="flex justify-end"><Button variant="primary" onClick={finish}>Go to Command Center <ArrowRight className="size-4" /></Button></div>
             </div>

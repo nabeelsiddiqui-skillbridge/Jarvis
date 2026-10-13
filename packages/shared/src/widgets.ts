@@ -195,8 +195,10 @@ export interface QueryResult {
   unavailableReason: string | null;
   total: number | null;
   comparisonTotal: number | null;
-  /** Percentage change vs comparison; null when either side is unavailable or comparison is zero. */
+  /** Percentage change vs comparison; null when either side is unavailable, incomplete, or comparison is zero. */
   change: number | null;
+  /** The comparison period is only partly covered by data, so no % change is given. */
+  comparisonPartial: boolean;
   series: { bucket: string; value: number | null; comparison: number | null }[] | null;
   rows: { label: string; value: number | null; share: number | null; extra?: Record<string, number | null> }[] | null;
   /** Extra metric totals (funnels, tables). */

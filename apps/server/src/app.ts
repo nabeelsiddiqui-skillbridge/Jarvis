@@ -12,6 +12,8 @@ import { metricsRouter } from "./routes/metrics.js";
 import { dashboardsRouter } from "./routes/dashboards.js";
 import { eventsRouter } from "./routes/events.js";
 import { overviewRouter } from "./routes/overview.js";
+import { connectionsRouter, oauthRouter } from "./routes/connections.js";
+import { webhooksRouter } from "./routes/webhooks.js";
 
 export function createApp() {
   const app = express();
@@ -27,7 +29,8 @@ export function createApp() {
     next();
   });
 
-  // Webhooks need the raw body for signature verification; mounted before JSON parsing (Stage 3).
+  // Webhooks need the raw body for signature verification, so they're mounted before JSON parsing.
+  app.use("/api", webhooksRouter);
   app.use("/api", express.json({ limit: "1mb" }));
   app.use("/api", sessionMiddleware);
 
@@ -55,6 +58,8 @@ export function createApp() {
   app.use("/api", dashboardsRouter);
   app.use("/api", eventsRouter);
   app.use("/api", overviewRouter);
+  app.use("/api", connectionsRouter);
+  app.use("/api", oauthRouter);
 
   app.use("/api", (_req, res) => res.status(404).json({ error: { code: "not_found", message: "Unknown API route." } }));
 

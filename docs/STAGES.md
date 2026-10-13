@@ -49,3 +49,53 @@ Status of each stage of the build plan: what works, what is simulated, and what 
 - A browser walkthrough of demo creation, Command Center, dashboard editing (add widget with target, remove, undo, reload) and version history found no console errors. The 390px mobile layout has no horizontal overflow.
 
 **External setup**: none beyond Stage 1.
+
+## Stage 3 — Connector framework and a complete live connector (Shopify) ✅
+
+**Works**
+- **Connector contract** (`apps/server/src/connectors/types.ts`) covers authorization, asset discovery and selection, scopes, capabilities, initial import, incremental sync, reconciliation, webhooks, token refresh, health checks and revocation. Shared plumbing:
+  - provider HTTP client with timeouts, bounded retries, exponential backoff with jitter, `Retry-After`, and error classes (auth / scope / rate limit / transient / permanent);
+  - credential storage (AES-256-GCM, never readable by the app database role or sent to the browser) with **token refresh under a per-connection advisory lock**, so single-use rotating refresh tokens are never used twice;
+  - source records with provenance, and **idempotent fact recomputation per day** from them.
+- **Durable job queue** in Postgres (`FOR UPDATE SKIP LOCKED`, dedupe keys, retries with backoff, lease recovery), a separate **worker process**, and a scheduler for incremental syncs, daily reconciliation of recent days, and daily health checks.
+- **Webhooks**: raw-body signature verification, a receipt per delivery that is unique by provider delivery id (duplicates acknowledged and ignored), and asynchronous processing.
+- **Shopify (complete)**:
+  - OAuth authorization-code grant requesting **expiring offline tokens** (1-hour access token plus rotating refresh token), with callback HMAC verification, shop-domain validation, and one-time 10-minute state bound to the user and business;
+  - GraphQL Admin API (pinned version 2026-07) with cursor pagination and cost-based throttling;
+  - initial import, then incremental by `updated_at` with a 10-minute overlap, then nightly 14-day reconciliation;
+  - webhooks for orders, refunds and uninstall, re-fetched through the API rather than trusting the webhook body;
+  - mandatory privacy webhooks (customer redact, shop redact, data request);
+  - revocation on disconnect.
+- **Shopify metric definitions**: net sales come from the current subtotal (after discounts, refunds and edits; excluding tax and shipping); cancelled and test orders are excluded; days follow the store's timezone; and zero-order days are stored as real zeros.
+  - COGS is written only for days where every line item has a unit cost, so profit is never overstated.
+  - New customers are computed only when full order history is available.
+- **Connections UI**:
+  - a catalog labelled Available / Configuration required / Provider access pending / Planned;
+  - connect dialog with the requested permissions and provider requirements, then the provider's own consent page, then account selection (with currency/timezone mismatch notes), then a background import;
+  - connection cards showing account, selected assets, granted permissions (and missing ones), sync status including retries, last successful sync, data range available, reporting delay and errors;
+  - Sync now, Reconnect, Change accounts, History, and Disconnect (optionally deleting imported data).
+- Onboarding gained a "Connect your first data source" step, which can be skipped.
+- Comparisons are honest: if the prior period is only partly covered by data, no % change is shown.
+
+**Verified** (`apps/server/test/shopify.test.ts`, against a local Shopify stand-in)
+- Tampered callbacks, replayed state, another user's callback and invalid shop domains are all rejected.
+- Credentials are encrypted at rest and never appear in API responses.
+- Imported net sales and order counts **reconcile day by day with the source orders**, including zero days; data outside the import window is "unavailable".
+- A 503 and a cost-throttle during import are retried transparently.
+- Webhook with forged signature → 401; duplicate delivery → acknowledged, processed once; a refund updates that day's facts.
+- Re-running a sync leaves facts byte-for-byte identical (idempotent), and "Sync now" twice queues one job.
+- An expired token is refreshed exactly once with rotation.
+- Provider-side revocation → "Reconnect needed" with no retry storm; reconnecting reuses the same connection.
+- Nothing is reachable across businesses; disconnect revokes at the provider and optionally deletes data.
+- A browser walkthrough of onboarding → catalog → connect → consent → select store → import → dashboard from template → Command Center, all on imported data.
+
+**Simulated / not verified live**
+- No live Shopify store was available in this environment. The connector was exercised against a local stand-in implementing the same endpoints, so **live verification against a real development store is still required**.
+
+**External setup required for Shopify**
+1. Create an app in the Shopify Partner/Dev Dashboard. Set the redirect URL `<API_URL>/api/oauth/shopify/callback` and request expiring offline tokens.
+2. Set `SHOPIFY_API_KEY` and `SHOPIFY_API_SECRET`.
+3. Serve the API over public HTTPS so webhooks register automatically. Configure the compliance webhook URL `<API_URL>/api/webhooks/shopify` in the app configuration.
+4. Optional:
+   - request `read_all_orders` approval from Shopify for history beyond 60 days (then set `SHOPIFY_REQUEST_ALL_ORDERS=true`);
+   - protected customer data review for a public app.
