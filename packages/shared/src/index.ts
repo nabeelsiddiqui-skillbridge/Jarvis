@@ -6,3 +6,4 @@ export * from "./widgets.js";
 export * from "./calc.js";
 export * from "./templates.js";
 export * from "./assistant.js";
+export * from "./speech.js";

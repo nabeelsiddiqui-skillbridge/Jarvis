@@ -37,14 +37,14 @@ export const useProposal = (businessId: string, proposalId: string | null) =>
  * Send a message and consume the streamed reply (server-sent events on the POST
  * response). Calls `onEvent` for each event; resolves when the stream ends.
  */
-export async function streamMessage(businessId: string, conversationId: string, text: string, onEvent: (e: AssistantStreamEvent) => void, signal: AbortSignal) {
+export async function streamMessage(businessId: string, conversationId: string, text: string, onEvent: (e: AssistantStreamEvent) => void, signal: AbortSignal, opts: { voice?: boolean } = {}) {
   let res: Response;
   try {
     res = await fetch(`/api/businesses/${businessId}/assistant/conversations/${conversationId}/messages`, {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json", "X-BCA-Client": "web", Accept: "text/event-stream" },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, voice: opts.voice || undefined }),
       signal,
     });
   } catch (err) {

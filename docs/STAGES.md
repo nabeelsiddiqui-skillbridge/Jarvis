@@ -242,3 +242,42 @@ Status of each stage of the build plan: what works, what is simulated, and what 
 **External setup required**
 - `ANTHROPIC_API_KEY` (server only). Optionally `ASSISTANT_MODEL`, `ASSISTANT_EFFORT` and `ASSISTANT_DAILY_MESSAGES`.
 - Server-side fallbacks and the `fallbacks` parameter apply on the Claude API directly.
+
+## Stage 6 — Streaming voice assistant ✅
+
+**Works**
+- **Voice conversation** in the assistant panel and on the Assistant page, including full-screen on phones. Press the mic button, speak, and the question is sent as soon as you stop talking. The reply streams on screen with its evidence and is read aloud sentence by sentence as it arrives, then the assistant listens again. "End voice" stops everything.
+- **Streaming speech-to-text (Deepgram)**:
+  - The browser connects straight to Deepgram's live endpoint (`nova-3`, interim results, endpointing, utterance end).
+  - It uses a **short-lived token** that the server mints per session through `POST /v1/auth/grant`. Tokens last about 30 seconds and are only needed to open the socket.
+  - The API key never reaches the browser.
+  - Session responses are `no-store`, rate-limited, and need access to the business.
+  - Live transcript is shown while you speak.
+- **Text-to-speech** goes through a server proxy (`/voice/speak`, Deepgram Aura), so no credential is in the browser for speaking either.
+  - Markdown, tables and evidence ids are stripped from the spoken text; tables stay on screen.
+  - A sentence splitter speaks complete sentences as they stream, without losing text or splitting numbers like "3.57".
+- **Barge-in**: with streaming recognition, talking over the reply stops it. The microphone uses echo cancellation and is muted while the answer is being looked up.
+- **Voice-aware answers**: a spoken question adds an operator note (a mid-conversation system message) asking for a short spoken reply with natural numbers, still citing evidence on screen. History replay stays valid: such a note is dropped, consistently, when the turn after it failed.
+- **Fallback without a voice provider**: the browser's own speech recognition and voices, labelled as such ("audio may be processed by the browser vendor"). In this mode the mic pauses while the answer is spoken, because the browser recognizer has no echo cancellation.
+- **Clear states and errors**: starting, listening, looking up, speaking, and voice stopped. Messages cover a blocked or missing microphone, an unsupported browser, a dropped connection, and an unconfigured provider.
+
+**Verified**
+- `apps/server/test/voice.test.ts`:
+  - browser fallback when unconfigured;
+  - token minting with a `no-store` response, the stream URL parameters, and no key in any response, including on provider failure;
+  - speech proxy streaming audio, with text length limits;
+  - cross-business denial;
+  - the voice note being added to the request, and later requests replaying it validly as an exact prefix.
+- `packages/shared` tests: the sentence splitter (no lost text, numbers kept whole) and spoken-text cleaning.
+- Browser walkthrough in Chromium with a fake microphone, against a local Deepgram stand-in (token grant, a WebSocket that accepts only a one-time token, scripted transcripts, and WAV speech): start voice → live transcript → question sent → streamed answer with E1 → speaking → listening again → end. No key appeared in browser traffic and there were no console errors.
+
+**Simulated / not verified live**
+- There were no Deepgram or Anthropic keys in this environment, so both services were local stand-ins.
+- The Deepgram token endpoint and response shape follow Deepgram's documentation (via search results; the docs host was unreachable here).
+- The exact WebSocket subprotocol for presenting a temporary token (`bearer`) couldn't be confirmed, so it is configurable (`VOICE_WS_AUTH_SCHEME`). **Live verification with a real key is required.**
+- The fallback's browser speech APIs behave differently by browser and couldn't be tested here, since headless Chromium has no speech service.
+
+**External setup required**
+- `DEEPGRAM_API_KEY` (Member permission or higher) for streaming voice. Optionally `VOICE_STT_MODEL`, `VOICE_TTS_MODEL`, `VOICE_LANGUAGE` and `VOICE_WS_AUTH_SCHEME`.
+- Voice also requires `ANTHROPIC_API_KEY`.
+- The site must be served over HTTPS in production for microphone access.

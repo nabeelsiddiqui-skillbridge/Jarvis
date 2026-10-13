@@ -79,7 +79,7 @@ assistantRouter.delete("/businesses/:businessId/assistant/conversations/:convers
   res.json({ ok: true });
 });
 
-const messageBody = z.object({ text: z.string().trim().min(1, "Type a question").max(4000) });
+const messageBody = z.object({ text: z.string().trim().min(1, "Type a question").max(4000), voice: z.boolean().optional() });
 const perUser = (req: Request) => req.user?.id ?? req.ip ?? "anon";
 
 assistantRouter.post(
@@ -106,7 +106,7 @@ assistantRouter.post(
     const emit = (e: AssistantStreamEvent) => { if (!res.writableEnded) res.write(`data: ${JSON.stringify(e)}\n\n`); };
     const heartbeat = setInterval(() => { if (!res.writableEnded) res.write(": ping\n\n"); }, 15_000);
     try {
-      await runTurn({ userId: req.user!.id, businessId: String(req.params.businessId), conversationId: String(req.params.conversationId), text: body.text, signal: abort.signal, emit });
+      await runTurn({ userId: req.user!.id, businessId: String(req.params.businessId), conversationId: String(req.params.conversationId), text: body.text, voice: body.voice ?? false, signal: abort.signal, emit });
     } catch (e) {
       console.error("[assistant] turn crashed", e);
       emit({ type: "error", message: "Something went wrong while generating the answer." });

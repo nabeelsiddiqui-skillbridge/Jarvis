@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowUp, Bot, CheckCircle2, Loader2, Square, XCircle } from "lucide-react";
+import { AlertTriangle, ArrowUp, Bot, CheckCircle2, Loader2, Mic, Square, XCircle } from "lucide-react";
 import type { AssistantStep, Business, DisplayMessage, Evidence, ProposalSummary } from "@bca/shared";
 import { cn } from "@/lib/cn";
 import { errorMessage, post } from "@/lib/api";
@@ -10,6 +10,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { CitationChip, EvidenceCard, EvidenceNote } from "./Evidence";
 import { Markdown } from "./Markdown";
 import { ProposalCard } from "./Proposal";
+import { VoiceBar, useVoiceMode } from "./Voice";
 
 interface Pending {
   user: DisplayMessage;
@@ -58,9 +59,13 @@ export function Chat({ business, conversationId, onConversation, onMissing, comp
   useEffect(() => { if ((conv.error as any)?.status === 404) onMissing?.(); }, [conv.error]);
   useEffect(() => { endRef.current?.scrollIntoView({ block: "end", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }); }, [conv.data?.messages.length, pending?.text.length, pending?.steps.length]);
 
-  async function send(text: string) {
+  const sendRef = useRef<(text: string, opts?: { voice?: boolean }) => void>(() => undefined);
+  const voice = useVoiceMode(business, (t) => sendRef.current(t, { voice: true }));
+
+  async function send(text: string, opts: { voice?: boolean } = {}) {
     text = text.trim();
     if (!text || busy) return;
+    if (opts.voice) voice.sent();
     setError(null);
     setDraft("");
     let id = conversationId;
@@ -74,6 +79,7 @@ export function Chat({ business, conversationId, onConversation, onMissing, comp
     } catch (e) {
       setError(errorMessage(e));
       setDraft(text);
+      if (opts.voice) voice.finish();
       return;
     }
     const ctrl = new AbortController();
@@ -84,7 +90,7 @@ export function Chat({ business, conversationId, onConversation, onMissing, comp
     try {
       await streamMessage(business.id, id, text, (e) => {
         if (e.type === "start") setPending((p) => p && { ...p, user: e.userMessage });
-        else if (e.type === "text") setPending((p) => p && { ...p, text: p.text + e.delta });
+        else if (e.type === "text") { setPending((p) => p && { ...p, text: p.text + e.delta }); if (opts.voice) voice.feed(e.delta); }
         else if (e.type === "step") setPending((p) => p && { ...p, steps: [...p.steps.filter((s) => s.id !== e.step.id), { ...e.step, done: e.done }] });
         else if (e.type === "evidence") setPending((p) => p && { ...p, evidence: [...p.evidence, e.evidence] });
         else if (e.type === "proposal") setPending((p) => p && { ...p, proposals: [...p.proposals, e.proposal] });
@@ -95,16 +101,19 @@ export function Chat({ business, conversationId, onConversation, onMissing, comp
             return null;
           });
         }
-      }, ctrl.signal);
+      }, ctrl.signal, { voice: opts.voice });
     } catch (e) {
       if ((e as Error).name !== "AbortError") { setError(errorMessage(e)); setDraft(text); }
     } finally {
+      if (opts.voice) voice.finish();
       abortRef.current = null;
       setPending(null);
       qc.invalidateQueries({ queryKey: key });
       qc.invalidateQueries({ queryKey: assistantKeys.conversations(business.id) });
     }
   }
+
+  sendRef.current = send;
 
   const messages = conv.data?.messages ?? [];
   // Citations may refer to evidence from earlier answers in the same conversation.
@@ -149,7 +158,9 @@ export function Chat({ business, conversationId, onConversation, onMissing, comp
           <div ref={endRef} />
         </div>
       </div>
-      <Composer value={draft} onChange={setDraft} onSend={() => send(draft)} onStop={() => abortRef.current?.abort()} busy={busy} disabled={configured === false} compact={compact} businessName={business.name} />
+      <VoiceBar voice={voice} compact={compact} />
+      <Composer value={draft} onChange={setDraft} onSend={() => send(draft)} onStop={() => { abortRef.current?.abort(); }} busy={busy} disabled={configured === false} compact={compact} businessName={business.name}
+        onVoice={voice.state === "off" || voice.state === "error" ? () => voice.start() : undefined} />
     </div>
   );
 }
@@ -208,8 +219,8 @@ function EvidencePanel({ evidence: e, open }: { evidence: Evidence | undefined; 
   );
 }
 
-function Composer({ value, onChange, onSend, onStop, busy, disabled, compact, businessName }: {
-  value: string; onChange: (v: string) => void; onSend: () => void; onStop: () => void; busy: boolean; disabled: boolean; compact?: boolean; businessName: string;
+function Composer({ value, onChange, onSend, onStop, busy, disabled, compact, businessName, onVoice }: {
+  value: string; onChange: (v: string) => void; onSend: () => void; onStop: () => void; busy: boolean; disabled: boolean; compact?: boolean; businessName: string; onVoice?: () => void;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
@@ -227,6 +238,9 @@ function Composer({ value, onChange, onSend, onStop, busy, disabled, compact, bu
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); if (!busy) onSend(); } }}
           className="max-h-[180px] min-h-[36px] flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-fg outline-none placeholder:text-subtle disabled:opacity-60" />
+        {onVoice && !busy && !value.trim() && (
+          <button type="button" onClick={onVoice} disabled={disabled} aria-label="Talk to the assistant" title="Voice conversation" className="grid size-9 shrink-0 place-items-center rounded-lg text-muted hover:bg-white/5 hover:text-accent disabled:opacity-40"><Mic className="size-4" /></button>
+        )}
         {busy ? (
           <button type="button" onClick={onStop} aria-label="Stop generating" className="grid size-9 shrink-0 place-items-center rounded-lg bg-raised text-fg hover:bg-white/10"><Square className="size-3.5 fill-current" /></button>
         ) : (

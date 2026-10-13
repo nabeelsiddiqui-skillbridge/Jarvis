@@ -71,6 +71,8 @@ export interface TurnInput {
   businessId: string;
   conversationId: string;
   text: string;
+  /** Spoken question; the reply will be read aloud. */
+  voice?: boolean;
   signal: AbortSignal;
   emit: (e: AssistantStreamEvent) => void;
 }
@@ -101,7 +103,7 @@ async function turn(t: TurnInput) {
     const userMsg: DisplayMessage = { id: randomUUID(), role: "user", status: "complete", text: t.text, steps: [], evidence: [], proposals: [], createdAt: new Date().toISOString() };
     await db.query(
       `INSERT INTO conversation_messages (id, conversation_id, business_id, seq, role, display, api_messages) VALUES ($1, $2, $3, $4, 'user', $5, $6)`,
-      [userMsg.id, t.conversationId, business.id, seq, JSON.stringify(userMsg), JSON.stringify([{ role: "user", content: t.text }])],
+      [userMsg.id, t.conversationId, business.id, seq, JSON.stringify(userMsg), JSON.stringify(userTurn(t))],
     );
     if (conv.rows[0].title === "New conversation") await db.query(`UPDATE conversations SET title = $2, updated_at = now() WHERE id = $1`, [t.conversationId, t.text.replace(/\s+/g, " ").slice(0, 80)]);
     else await db.query(`UPDATE conversations SET updated_at = now() WHERE id = $1`, [t.conversationId]);
@@ -115,8 +117,8 @@ async function turn(t: TurnInput) {
   t.emit({ type: "start", conversationId: t.conversationId, userMessage: loaded.userMsg });
 
   // 2. Rebuild the API history append-only from stored turns.
-  const history: Msg[] = loaded.rows.flatMap((r) => r.api_messages as Msg[]);
-  const messages: Msg[] = [...history, { role: "user", content: t.text }];
+  const history = replayable(loaded.rows.flatMap((r) => r.api_messages as Msg[]));
+  const messages: Msg[] = [...history, ...userTurn(t)];
   const turnMessages: Msg[] = [];
 
   let evidenceN = loaded.evidenceCount;
@@ -227,6 +229,20 @@ async function turn(t: TurnInput) {
     await db.query(`UPDATE conversations SET updated_at = now() WHERE id = $1`, [t.conversationId]);
   });
   t.emit({ type: "done", message: reply });
+}
+
+const VOICE_HINT = "The user asked this by voice and will hear your reply read aloud. Answer in two to four short spoken sentences: lead with the answer, say numbers the way a person would (\"about 224 thousand dollars\"), and skip tables and long lists. Still cite evidence ids as usual (they are shown on screen, not read out). Offer to show more detail on screen if useful.";
+
+/** The stored user turn: the question, plus a voice-mode operator note when spoken. */
+const userTurn = (t: TurnInput): Msg[] => [{ role: "user", content: t.text }, ...(t.voice ? [{ role: "system" as const, content: VOICE_HINT }] : [])];
+
+/**
+ * Replayed history must stay valid: a mid-conversation system message has to be
+ * followed by an assistant turn (or be last). After a failed turn nothing follows
+ * it, so such notes are left out — deterministically, so replays stay identical.
+ */
+function replayable(msgs: Msg[]): Msg[] {
+  return msgs.filter((m, i) => m.role !== "system" || msgs[i + 1]?.role === "assistant");
 }
 
 const PENDING: Record<string, string> = {

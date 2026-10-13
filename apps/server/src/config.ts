@@ -24,6 +24,15 @@ export const config = {
     model: env("ASSISTANT_MODEL") ?? "claude-opus-5-5",
     effort: (env("ASSISTANT_EFFORT") ?? "medium") as "low" | "medium" | "high",
   },
+  voice: {
+    /** Deepgram: streaming speech-to-text (browser connects with a short-lived token) and text-to-speech (proxied). */
+    deepgramKey: env("DEEPGRAM_API_KEY"),
+    sttModel: env("VOICE_STT_MODEL") ?? "nova-3",
+    ttsModel: env("VOICE_TTS_MODEL") ?? "aura-2-thalia-en",
+    language: env("VOICE_LANGUAGE") ?? "en",
+    /** WebSocket subprotocol scheme the browser uses to present the temporary token. */
+    wsAuthScheme: env("VOICE_WS_AUTH_SCHEME") ?? "bearer",
+  },
 };
 
 export type SecretStatus = { key: string; label: string; configured: boolean; requiredFor: string };
@@ -34,6 +43,7 @@ export function configStatus(): SecretStatus[] {
     ["DATABASE_URL", "PostgreSQL connection", "Everything"],
     ["ENCRYPTION_KEY", "Token encryption key", "Storing provider credentials (required in production)"],
     ["ANTHROPIC_API_KEY", "Anthropic API key", "AI assistant, voice, AI dashboard generation, insight explanations"],
+    ["DEEPGRAM_API_KEY", "Deepgram API key", "Streaming voice (speech-to-text and text-to-speech); without it the browser's built-in speech is used where available"],
     ["SHOPIFY_API_KEY", "Shopify app client ID", "Shopify connector"],
     ["SHOPIFY_API_SECRET", "Shopify app client secret", "Shopify connector + webhook verification"],
     ["GOOGLE_CLIENT_ID", "Google OAuth client ID", "GA4, Search Console, Google Ads"],

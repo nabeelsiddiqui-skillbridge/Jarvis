@@ -78,3 +78,21 @@ describe("templates", () => {
     expect(omitted.find((o) => o.title === "Marketing efficiency ratio")?.missing).toEqual(["ad_spend"]);
   });
 });
+
+import { SentenceChunker, toSpeech } from "../src/speech.js";
+
+describe("speech helpers", () => {
+  it("splits streamed text into sentences without losing or splitting numbers", () => {
+    const c = new SentenceChunker();
+    const parts = ["ROAS was 3.", "57× over the last", " 30 days. Spend rose", " 4.2% to $42,135! Next"];
+    const out = parts.flatMap((p) => c.push(p));
+    expect(out).toEqual(["ROAS was 3.57× over the last 30 days.", " Spend rose 4.2% to $42,135!"]);
+    expect(c.flush()).toEqual([" Next"]);
+    expect([...out, " Next"].join("")).toBe(parts.join(""));
+  });
+
+  it("removes markdown, tables and evidence ids from spoken text", () => {
+    const md = "**Net sales** were **$224,083** [E1], up 5.1% [E1, E2].\n\n| A | B |\n|---|---|\n| x | 1 |\n\n- Organic search led";
+    expect(toSpeech(md)).toBe("Net sales were $224,083, up 5.1%. Organic search led");
+  });
+});
