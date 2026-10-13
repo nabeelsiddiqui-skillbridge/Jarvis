@@ -1,0 +1,55 @@
+/**
+ * Central configuration. Secrets are read here and nowhere else; `configStatus()`
+ * reports *whether* each is set (for the admin console) without exposing values.
+ */
+
+const env = (key: string) => process.env[key]?.trim() || undefined;
+
+export const config = {
+  env: env("NODE_ENV") ?? "development",
+  isProd: env("NODE_ENV") === "production",
+  port: Number(env("PORT") ?? 8787),
+  appUrl: env("APP_URL") ?? "http://localhost:5173",
+  /** Public origin of the API (OAuth redirect URIs and webhook URLs are built from it). */
+  apiUrl: env("API_URL") ?? `http://localhost:${env("PORT") ?? 8787}`,
+  databaseUrl: env("DATABASE_URL") ?? "postgres://postgres@localhost:5432/bca",
+  /** Encrypts provider tokens at rest (AES-256-GCM). Required in production. */
+  encryptionKey: env("ENCRYPTION_KEY"),
+  trustProxy: env("TRUST_PROXY"),
+  allowSignup: env("ALLOW_SIGNUP") !== "false",
+  /** Comma-separated emails that become platform administrators on sign-up / boot. */
+  platformAdmins: (env("PLATFORM_ADMIN_EMAILS") ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
+  anthropic: {
+    apiKey: env("ANTHROPIC_API_KEY"),
+    model: env("ASSISTANT_MODEL") ?? "claude-opus-5-5",
+    effort: (env("ASSISTANT_EFFORT") ?? "medium") as "low" | "medium" | "high",
+  },
+};
+
+export type SecretStatus = { key: string; label: string; configured: boolean; requiredFor: string };
+
+/** Which secrets/config are present. Values are never returned. */
+export function configStatus(): SecretStatus[] {
+  const items: [string, string, string][] = [
+    ["DATABASE_URL", "PostgreSQL connection", "Everything"],
+    ["ENCRYPTION_KEY", "Token encryption key", "Storing provider credentials (required in production)"],
+    ["ANTHROPIC_API_KEY", "Anthropic API key", "AI assistant, voice, AI dashboard generation, insight explanations"],
+    ["SHOPIFY_API_KEY", "Shopify app client ID", "Shopify connector"],
+    ["SHOPIFY_API_SECRET", "Shopify app client secret", "Shopify connector + webhook verification"],
+    ["GOOGLE_CLIENT_ID", "Google OAuth client ID", "GA4, Search Console, Google Ads"],
+    ["GOOGLE_CLIENT_SECRET", "Google OAuth client secret", "GA4, Search Console, Google Ads"],
+    ["GOOGLE_ADS_DEVELOPER_TOKEN", "Google Ads developer token", "Google Ads connector"],
+    ["HUBSPOT_CLIENT_ID", "HubSpot app client ID", "HubSpot connector"],
+    ["HUBSPOT_CLIENT_SECRET", "HubSpot app client secret", "HubSpot connector + webhook verification"],
+    ["STRIPE_SECRET_KEY", "Stripe secret key", "Billing"],
+    ["STRIPE_WEBHOOK_SECRET", "Stripe webhook signing secret", "Billing webhooks"],
+    ["SMTP_URL", "SMTP server", "Email delivery of briefings, reports and invitations"],
+  ];
+  return items.map(([key, label, requiredFor]) => ({ key, label, requiredFor, configured: Boolean(env(key)) }));
+}
+
+export function assertProductionConfig() {
+  if (!config.isProd) return;
+  const missing = ["DATABASE_URL", "ENCRYPTION_KEY", "APP_URL", "API_URL"].filter((k) => !env(k));
+  if (missing.length) throw new Error(`Missing required production configuration: ${missing.join(", ")}`);
+}

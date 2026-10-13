@@ -1,0 +1,34 @@
+{
+  "name": "@bca/server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev:api": "tsx watch --env-file-if-exists=../../.env src/api.ts",
+    "dev:worker": "tsx watch --env-file-if-exists=../../.env src/worker.ts",
+    "db:migrate": "tsx --env-file-if-exists=../../.env src/db/migrate.ts",
+    "db:seed-demo": "tsx --env-file-if-exists=../../.env src/demo/seed-cli.ts",
+    "build": "tsup",
+    "start": "node --env-file-if-exists=../../.env dist/api.js",
+    "start:worker": "node --env-file-if-exists=../../.env dist/worker.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
+    "@bca/shared": "*",
+    "express": "^5.1.0",
+    "pg": "^8.16.3",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/node": "^22.18.0",
+    "@types/pg": "^8.15.5",
+    "@types/supertest": "^6.0.3",
+    "supertest": "^7.1.4",
+    "tsup": "^8.5.0",
+    "tsx": "^4.20.0",
+    "vitest": "^3.2.4"
+  }
+}

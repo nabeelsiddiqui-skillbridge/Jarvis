@@ -1,19 +1,27 @@
 {
-  "name": "jarvis",
+  "name": "business-command-ai",
   "private": true,
   "version": "0.1.0",
-  "description": "JARVIS — a voice + chat AI command center for all your accounts, with live editable dashboards.",
+  "description": "Business Command AI — an AI business command center: connect business accounts, ask questions by voice or text, and build live dashboards.",
   "workspaces": [
-    "server",
-    "client"
+    "packages/*",
+    "apps/*"
   ],
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
-    "dev": "concurrently -n server,client -c cyan,magenta \"npm run dev -w server\" \"npm run dev -w client\"",
-    "build": "npm run build -w server && npm run build -w client",
-    "start": "npm run start -w server",
-    "typecheck": "npm run typecheck -w server && npm run typecheck -w client"
+    "dev": "concurrently -n api,worker,web -c cyan,yellow,magenta \"npm run dev:api -w @bca/server\" \"npm run dev:worker -w @bca/server\" \"npm run dev -w @bca/web\"",
+    "db:migrate": "npm run db:migrate -w @bca/server",
+    "db:seed-demo": "npm run db:seed-demo -w @bca/server",
+    "build": "npm run build -w @bca/server && npm run build -w @bca/web",
+    "start": "npm run start -w @bca/server",
+    "start:worker": "npm run start:worker -w @bca/server",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1"
+    "concurrently": "^9.2.1",
+    "typescript": "~5.9.3"
   }
 }
