@@ -6,6 +6,7 @@ import { INDUSTRIES, ROLE_LABELS, type Business } from "@bca/shared";
 import { post } from "@/lib/api";
 import { useMe } from "@/lib/session";
 import { Badge, DemoBadge } from "@/components/ui/Badge";
+import { DeckClock, OnlineBadge } from "@/components/deck/Deck";
 import { BusinessAvatar, UserAvatar } from "@/components/ui/Avatar";
 import { IconButton } from "@/components/ui/Button";
 import { Popover } from "@/components/ui/Popover";
@@ -56,6 +57,10 @@ export function TopBar({ business, title, workspaceId, onMenu, assistantOpen, on
       )}
 
       <div className="flex items-center gap-1">
+        <div className="mr-2 hidden items-center gap-3 md:flex">
+          <DeckClock timezone={business?.timezone} />
+          <OnlineBadge />
+        </div>
         {business && showAssistantToggle && (
           <IconButton label={assistantOpen ? "Hide assistant" : "Show assistant"} onClick={onToggleAssistant} className="hidden xl:inline-grid">
             {assistantOpen ? <PanelRightClose className="size-5" /> : <PanelRightOpen className="size-5" />}

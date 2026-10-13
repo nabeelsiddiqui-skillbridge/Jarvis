@@ -7,10 +7,10 @@ type Variant = "primary" | "secondary" | "ghost" | "danger" | "outline";
 type Size = "sm" | "md" | "lg";
 
 const base =
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg font-medium transition-[background,box-shadow,color,border-color] duration-150 disabled:pointer-events-none disabled:opacity-50 select-none";
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[4px] font-medium transition-[background,box-shadow,color,border-color] duration-150 disabled:pointer-events-none disabled:opacity-50 select-none";
 const variants: Record<Variant, string> = {
   primary:
-    "bg-accent text-[#04121a] hover:bg-[#5ee3f5] shadow-[0_0_0_1px_rgb(34_211_238/0.4),0_6px_20px_-8px_rgb(34_211_238/0.6)]",
+    "bg-accent font-mono font-semibold uppercase tracking-[0.12em] text-[#04121a] hover:bg-[#5ee3f5] shadow-[0_0_0_1px_rgb(34_211_238/0.4),0_6px_22px_-6px_rgb(34_211_238/0.7)]",
   secondary: "bg-raised text-fg border border-line hover:border-line-strong hover:bg-[#1b2945]",
   outline: "border border-line-strong text-fg hover:bg-white/5",
   ghost: "text-muted hover:text-fg hover:bg-white/5",

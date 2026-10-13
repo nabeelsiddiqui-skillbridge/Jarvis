@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { BarChart3, Mic, ShieldCheck } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
+import { JarvisCore } from "@/components/jarvis/JarvisCore";
 
 export function AuthLayout({ title, subtitle, children }: { title: string; subtitle?: ReactNode; children: ReactNode }) {
   return (
@@ -9,6 +10,7 @@ export function AuthLayout({ title, subtitle, children }: { title: string; subti
         <div className="grid-bg absolute inset-0 opacity-60 [mask-image:radial-gradient(ellipse_at_30%_20%,#000,transparent_70%)]" />
         <Logo className="relative" />
         <div className="relative max-w-md">
+          <JarvisCore size={220} className="mb-8" />
           <h2 className="text-3xl font-semibold leading-tight">
             Every business account. <span className="text-gradient">One command center.</span>
           </h2>

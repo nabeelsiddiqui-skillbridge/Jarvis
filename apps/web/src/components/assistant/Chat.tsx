@@ -12,7 +12,8 @@ import { useMe } from "@/lib/session";
 import { CitationChip, EvidenceCard, EvidenceNote } from "./Evidence";
 import { Markdown } from "./Markdown";
 import { ProposalCard } from "./Proposal";
-import { VoiceBar, useVoiceMode } from "./Voice";
+import { VoiceBar, useVoiceMode, voiceCore } from "./Voice";
+import { CORE_LABEL, JarvisCore, JarvisWave, type CoreState } from "@/components/jarvis/JarvisCore";
 
 interface Pending {
   user: DisplayMessage;
@@ -35,7 +36,7 @@ const SUGGESTIONS = [
  * The conversation UI shared by the side panel and the Assistant page. Replies
  * stream in; every figure links to the evidence it came from.
  */
-export function Chat({ business, conversationId, onConversation, onMissing, compact, initialDraft }: {
+export function Chat({ business, conversationId, onConversation, onMissing, compact, initialDraft, deck }: {
   business: Business;
   conversationId: string | null;
   onConversation: (id: string) => void;
@@ -44,6 +45,8 @@ export function Chat({ business, conversationId, onConversation, onMissing, comp
   compact?: boolean;
   /** Pre-filled question (e.g. from a suggested question link). */
   initialDraft?: string;
+  /** Command-deck presentation: the JARVIS core above the log, a command-line composer. */
+  deck?: { greeting: string };
 }) {
   const status = useAssistantStatus(business.id);
   const conv = useConversation(business.id, conversationId);
@@ -62,7 +65,12 @@ export function Chat({ business, conversationId, onConversation, onMissing, comp
     if (conversationId !== createdRef.current) { abortRef.current?.abort(); setPending(null); setError(null); }
   }, [conversationId]);
   useEffect(() => { if ((conv.error as any)?.status === 404) onMissing?.(); }, [conv.error]);
-  useEffect(() => { endRef.current?.scrollIntoView({ block: "end", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }); }, [conv.data?.messages.length, pending?.text.length, pending?.steps.length]);
+  // Scroll only the log itself (never the page around it, e.g. the command deck).
+  const logRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = logRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  }, [conv.data?.messages.length, pending?.text.length, pending?.steps.length]);
 
   const sendRef = useRef<(text: string, opts?: { voice?: boolean }) => void>(() => undefined);
   const voice = useVoiceMode(business, (t) => sendRef.current(t, { voice: true }));
@@ -126,10 +134,29 @@ export function Chat({ business, conversationId, onConversation, onMissing, comp
   const lookup = new Map<string, Evidence>([...messages.flatMap((m) => m.evidence), ...(pending?.evidence ?? [])].map((e) => [e.id, e]));
   const configured = status.data?.configured;
   const empty = !messages.length && !pending;
+  // What JARVIS is doing right now, for the core's motion and status word.
+  const coreState: CoreState = configured === false ? "offline"
+    : voice.state !== "off" ? voiceCore(voice.state)
+    : pending ? (pending.steps.some((s) => !s.done) ? "retrieving" : pending.text ? "speaking" : "analyzing")
+    : "standby";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div role="log" aria-live="polite" aria-busy={busy} aria-label="Conversation" className={cn("min-h-0 flex-1 overflow-y-auto", compact ? "px-3 py-3" : "px-4 py-5 md:px-6")}>
+      {deck && (
+        <div className="shrink-0 border-b border-line px-4 pb-3 pt-4">
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-subtle">
+            <span className="hud-label">Core // JARVIS<span className="hidden sm:inline"> neural interface</span></span>
+            <span className="hud-label">Mode: {voice.state !== "off" ? "Voice" : "Command"}</span>
+          </div>
+          <div className="flex flex-col items-center">
+            <JarvisCore state={coreState} size={empty ? 300 : 190} maxHeight={empty ? "34dvh" : "22dvh"} className="mt-2" />
+            <p className="mt-3 font-display text-2xl font-semibold uppercase tracking-[0.35em] text-fg sm:text-[28px]" aria-live="polite">{CORE_LABEL[coreState]}</p>
+            <p className="mt-1.5 text-center font-mono text-[12.5px] text-muted">{configured === false ? status.data?.reason : deck.greeting}</p>
+            <JarvisWave active={coreState === "listening" || coreState === "speaking"} className="mt-3" />
+          </div>
+        </div>
+      )}
+      <div ref={logRef} role="log" aria-live="polite" aria-busy={busy} aria-label="Conversation" className={cn("min-h-0 flex-1 overflow-y-auto", compact ? "px-3 py-3" : "px-4 py-5 md:px-6")}>
         <div className={cn("mx-auto flex flex-col gap-5", !compact && "max-w-3xl")}>
           {conversationId && conv.isLoading && <div className="py-8"><Spinner label="Loading conversation" /></div>}
           {empty && !conv.isLoading && (
@@ -165,7 +192,7 @@ export function Chat({ business, conversationId, onConversation, onMissing, comp
         </div>
       </div>
       <VoiceBar voice={voice} compact={compact} />
-      <Composer value={draft} onChange={setDraft} onSend={() => send(draft)} onStop={() => { abortRef.current?.abort(); }} busy={busy} disabled={configured === false} compact={compact} businessName={business.name}
+      <Composer value={draft} onChange={setDraft} onSend={() => send(draft)} onStop={() => { abortRef.current?.abort(); }} busy={busy} disabled={configured === false} compact={compact} deck={Boolean(deck)} businessName={business.name}
         onVoice={voice.state === "off" ? () => voice.start() : undefined} voiceUnavailable={status.data?.voiceReason ?? null} />
     </div>
   );
@@ -227,8 +254,8 @@ function EvidencePanel({ evidence: e, open }: { evidence: Evidence | undefined; 
   );
 }
 
-function Composer({ value, onChange, onSend, onStop, busy, disabled, compact, businessName, onVoice, voiceUnavailable }: {
-  value: string; onChange: (v: string) => void; onSend: () => void; onStop: () => void; busy: boolean; disabled: boolean; compact?: boolean; businessName: string; onVoice?: () => void; voiceUnavailable?: string | null;
+function Composer({ value, onChange, onSend, onStop, busy, disabled, compact, deck, businessName, onVoice, voiceUnavailable }: {
+  value: string; onChange: (v: string) => void; onSend: () => void; onStop: () => void; busy: boolean; disabled: boolean; compact?: boolean; deck?: boolean; businessName: string; onVoice?: () => void; voiceUnavailable?: string | null;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
@@ -237,6 +264,30 @@ function Composer({ value, onChange, onSend, onStop, busy, disabled, compact, bu
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
   }, [value]);
+  if (deck) {
+    return (
+      <form className="flex items-stretch gap-2 border-t border-line p-3 sm:p-4" onSubmit={(e) => { e.preventDefault(); onSend(); }}>
+        <label htmlFor="deck-input" className="sr-only">Command or question for JARVIS about {businessName}</label>
+        <div className="flex min-w-0 flex-1 items-center gap-2 rounded-[4px] border border-accent/40 bg-panel-2 px-3 focus-within:border-accent">
+          <span aria-hidden className="font-mono text-accent">&gt;</span>
+          <textarea id="deck-input" ref={ref} rows={1} value={value} disabled={disabled} maxLength={4000}
+            placeholder={disabled ? "Assistant not configured" : "Type a command or ask anything…"}
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); if (!busy) onSend(); } }}
+            className="max-h-[140px] min-h-[44px] flex-1 resize-none bg-transparent py-3 font-mono text-[13px] text-fg outline-none placeholder:text-subtle disabled:opacity-60" />
+        </div>
+        {onVoice && !busy && (
+          <button type="button" onClick={onVoice} disabled={disabled || Boolean(voiceUnavailable)} aria-label={voiceUnavailable ? `Voice unavailable: ${voiceUnavailable}` : "Talk to JARVIS"} title={voiceUnavailable ?? "Voice conversation"}
+            className="grid w-12 shrink-0 place-items-center rounded-[4px] border border-line bg-panel-2 text-muted hover:border-accent/50 hover:text-accent disabled:opacity-40"><Mic className="size-4" /></button>
+        )}
+        {busy ? (
+          <button type="button" onClick={onStop} className="hud-label shrink-0 rounded-[4px] border border-line bg-raised px-4 font-semibold text-fg hover:bg-white/10 sm:px-6">Stop</button>
+        ) : (
+          <button type="submit" disabled={disabled || !value.trim()} className="hud-label shrink-0 rounded-[4px] bg-accent px-4 font-semibold text-[#04121a] shadow-[0_0_24px_-6px_rgb(34_211_238/0.7)] transition-opacity disabled:opacity-40 sm:px-7">Execute</button>
+        )}
+      </form>
+    );
+  }
   return (
     <form className={cn("border-t border-line bg-panel-2/60", compact ? "p-3" : "p-3 md:px-6 md:py-4")} onSubmit={(e) => { e.preventDefault(); onSend(); }}>
       <div className={cn("mx-auto flex items-end gap-2 rounded-xl border border-line bg-panel p-1.5 focus-within:border-accent/50", !compact && "max-w-3xl")}>

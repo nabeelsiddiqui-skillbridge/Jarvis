@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Popover } from "@/components/ui/Popover";
 import { Skeleton } from "@/components/ui/Spinner";
 
-const PROVIDER_NAMES: Record<string, string> = { shopify: "Shopify", ga4: "GA4", gsc: "Search Console", google_ads: "Google Ads", hubspot: "HubSpot", csv: "CSV" };
+export const PROVIDER_NAMES: Record<string, string> = { shopify: "Shopify", ga4: "GA4", gsc: "Search Console", google_ads: "Google Ads", hubspot: "HubSpot", csv: "CSV" };
 
 export function relativeTime(iso: string | null) {
   if (!iso) return "never";

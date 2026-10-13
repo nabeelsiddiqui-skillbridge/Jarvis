@@ -21,7 +21,7 @@ export function Sidebar({ workspaceId, business, onNavigate }: { workspaceId: st
       <BusinessSwitcher workspaceId={workspaceId} active={business} />
 
       <div>
-        <p className="mb-1.5 px-3 text-[11px] font-medium uppercase tracking-[0.12em] text-subtle">Business</p>
+        <p className="hud-label mb-1.5 px-3 text-[10.5px] text-subtle">Business</p>
         {bizBase ? (
           <ul className="space-y-0.5">
             {businessNav.map((n) => (
@@ -38,7 +38,7 @@ export function Sidebar({ workspaceId, business, onNavigate }: { workspaceId: st
       </div>
 
       <div>
-        <p className="mb-1.5 px-3 text-[11px] font-medium uppercase tracking-[0.12em] text-subtle">Workspace</p>
+        <p className="hud-label mb-1.5 px-3 text-[10.5px] text-subtle">Workspace</p>
         <ul className="space-y-0.5">
           {workspaceNav.map((n) => (
             <li key={n.label}>

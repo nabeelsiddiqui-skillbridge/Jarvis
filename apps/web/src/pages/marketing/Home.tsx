@@ -1,5 +1,6 @@
 import { ArrowRight, BarChart3, Bot, Building2, CheckCircle2, FileText, Lightbulb, Mic, Plug, ShieldCheck, Workflow } from "lucide-react";
 import { ButtonLink } from "@/components/ui/Button";
+import { JarvisCore } from "@/components/jarvis/JarvisCore";
 
 /** Live connectors (working integrations) and planned ones, labelled as such. Mirrors the server's connector catalog. */
 export const LIVE_CONNECTORS = ["Shopify", "Google Analytics 4", "Google Search Console", "Google Ads", "HubSpot"];
@@ -10,7 +11,8 @@ export function Home() {
     <main>
       <section className="relative overflow-hidden">
         <div className="grid-bg absolute inset-0 [mask-image:radial-gradient(ellipse_at_50%_0%,#000,transparent_70%)]" />
-        <div className="relative mx-auto max-w-4xl px-5 pb-20 pt-24 text-center sm:pt-32">
+        <div className="relative mx-auto max-w-4xl px-5 pb-20 pt-16 text-center sm:pt-20">
+          <JarvisCore state="listening" size={240} className="mx-auto mb-8" />
           <p className="mx-auto inline-flex items-center gap-2 rounded-full border border-accent/30 bg-accent/10 px-3 py-1 text-xs font-medium text-accent">AI business command center</p>
           <h1 className="mt-6 text-4xl font-semibold leading-[1.08] sm:text-6xl">
             Run every business from <span className="text-gradient">one command center</span>

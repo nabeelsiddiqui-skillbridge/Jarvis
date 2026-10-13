@@ -1,5 +1,6 @@
 import { Link } from "react-router";
 import { cn } from "@/lib/cn";
+import { JarvisMark } from "@/components/jarvis/JarvisCore";
 
 export function LogoMark({ className }: { className?: string }) {
   return (
@@ -19,11 +20,12 @@ export function LogoMark({ className }: { className?: string }) {
 
 export function Logo({ to = "/", className, compact }: { to?: string; className?: string; compact?: boolean }) {
   return (
-    <Link to={to} className={cn("inline-flex items-center gap-2.5 font-display text-[15px] font-semibold tracking-tight", className)}>
-      <LogoMark />
+    <Link to={to} className={cn("inline-flex items-center gap-3", className)} aria-label="Business Command AI">
+      <JarvisMark size={34} />
       {!compact && (
-        <span>
-          Business Command <span className="text-gradient">AI</span>
+        <span className="leading-tight">
+          <span className="block whitespace-nowrap font-display text-[13.5px] font-semibold uppercase tracking-[0.14em]">Business Command <span className="text-accent">AI</span></span>
+          <span className="block whitespace-nowrap font-mono text-[9px] uppercase tracking-[0.16em] text-subtle">JARVIS intelligence system</span>
         </span>
       )}
     </Link>

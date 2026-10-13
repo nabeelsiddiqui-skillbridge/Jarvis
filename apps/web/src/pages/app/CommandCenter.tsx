@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, Bell, Bot, CheckCircle2, Circle, FlaskConical, MessageSquare, Plug, Sparkles } from "lucide-react";
+import { Activity, Bot, CheckCircle2, Circle, FlaskConical, Plug, Sparkles } from "lucide-react";
 import { can, type DateRangeSpec, type SourceInfo, type WidgetSpec, type WidgetType } from "@bca/shared";
 import { canWorkspace } from "@bca/shared";
 import { get, patch, post, errorMessage } from "@/lib/api";
@@ -17,8 +17,10 @@ import { Widget } from "@/components/widgets/Widget";
 import { DateRangeSelect } from "@/components/dashboard/pickers";
 import { CitationChip, EvidenceCard } from "@/components/assistant/Evidence";
 import { Markdown } from "@/components/assistant/Markdown";
-import { SEVERITY_STYLE } from "@/components/insights/InsightCard";
-import { useInsights, useLatestBriefing } from "@/lib/insights";
+import { useLatestBriefing } from "@/lib/insights";
+import { Chat } from "@/components/assistant/Chat";
+import { loadConversation, saveConversation } from "@/components/shell/AssistantPanel";
+import { Agenda, Alerts, Diagnostics, Modules, Signal, StatusStrip } from "@/components/deck/Deck";
 
 interface Overview {
   isDemo: boolean;
@@ -43,21 +45,19 @@ const q = (metric: string, extra: Partial<NonNullable<WidgetSpec["query"]>> = {}
 export function CommandCenter() {
   const b = useBusiness();
   const [range, setRange] = useState<DateRangeSpec>({ preset: "last_30_days" });
+  const [deckConversation, setDeckConversation] = useState<string | null>(() => loadConversation(b.id));
   const overview = useQuery({ queryKey: ["b", b.id, "overview"], queryFn: ({ signal }) => get<Overview>(`/businesses/${b.id}/overview`, signal) });
   const o = overview.data;
   const hasData = Boolean(o?.kpis.length);
   const labels: Record<string, string> = {};
 
+  const sources = o?.sources ?? [];
+  const fresh = sources.filter((s) => !s.stale && s.status !== "error" && s.status !== "reauth_required").length;
+  const deckGreeting = `Good ${greeting()}. ${sources.length ? (fresh === sources.length ? `All ${sources.length} data source${sources.length === 1 ? " is" : "s are"} up to date.` : `${fresh} of ${sources.length} data sources are up to date.`) : "No data sources are connected yet."}`;
+
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="mb-1 text-xs font-medium uppercase tracking-[0.14em] text-accent/80">Command Center</p>
-          <h1 className="text-2xl font-semibold sm:text-[28px]">Good {greeting()}</h1>
-          <p className="mt-1 text-sm text-muted">{b.name} · reporting in {b.currency}, {b.timezone.replace(/_/g, " ")}</p>
-        </div>
-        {hasData && <DateRangeSelect value={range} onChange={(v) => v && setRange(v)} />}
-      </div>
+      <h1 className="sr-only">Command Center — {b.name}</h1>
 
       {o?.isDemo && (
         <div role="note" className="flex items-start gap-3 rounded-xl border border-demo/30 bg-demo/5 px-4 py-3 text-sm">
@@ -68,6 +68,34 @@ export function CommandCenter() {
 
       {o && !o.isDemo && !b.support && <GettingStarted setup={o.setup} />}
 
+      {/* The command deck: JARVIS at the centre, live business systems around it. */}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(250px,290px)_minmax(0,1fr)_minmax(270px,310px)]">
+        <div className="order-2 min-w-0 space-y-4 xl:order-1">
+          <Diagnostics sources={sources} />
+          <Modules sources={sources} />
+        </div>
+        <section aria-label="JARVIS" className="panel hud order-1 flex h-[82dvh] min-w-0 min-h-[600px] flex-col overflow-hidden xl:order-2 xl:h-[min(880px,calc(100dvh-8rem))]">
+          {b.support ? (
+            <p className="m-auto max-w-sm p-6 text-center text-sm text-muted">The assistant isn't available during read-only support access.</p>
+          ) : (
+            <Chat key={b.id} business={b} conversationId={deckConversation} onConversation={(id) => { setDeckConversation(id); saveConversation(b.id, id); }} onMissing={() => { setDeckConversation(null); saveConversation(b.id, null); }} deck={{ greeting: deckGreeting }} />
+          )}
+        </section>
+        <div className="order-3 min-w-0 space-y-4">
+          <Agenda />
+          <Alerts />
+          <Signal metric={o?.revenueTrend ?? o?.kpis[0] ?? null} />
+        </div>
+      </div>
+      <StatusStrip sources={sources} />
+
+      {hasData && (
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+          <h2 className="hud-title">Performance</h2>
+          <DateRangeSelect value={range} onChange={(v) => v && setRange(v)} />
+        </div>
+      )}
+
       {overview.isPending ? (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-36" />)}</div>
       ) : !hasData ? (
@@ -76,7 +104,7 @@ export function CommandCenter() {
         <>
           <BriefingCard />
 
-          <section aria-label="Key performance indicators" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <section aria-label="Key performance indicators" className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4 [&>*]:min-w-0">
             {o!.kpis.map((k) => (
               <div key={k} className="h-44">
                 <Widget widget={w(`kpi-${k}`, "kpi", labels[k] ?? kpiTitle(k), q(k))} businessId={b.id} timezone={b.timezone} dashboardRange={range} />
@@ -84,7 +112,7 @@ export function CommandCenter() {
             ))}
           </section>
 
-          <div className="grid gap-4 xl:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 [&>*]:min-w-0">
             {o!.revenueTrend && <div className="h-80"><Widget widget={w("rev", "area", "Revenue trend", q(o!.revenueTrend))} businessId={b.id} timezone={b.timezone} dashboardRange={range} /></div>}
             {o!.acquisitionTrend && <div className="h-80"><Widget widget={w("acq", "line", "Acquisition trend", q(o!.acquisitionTrend))} businessId={b.id} timezone={b.timezone} dashboardRange={range} /></div>}
             {o!.salesView && (
@@ -92,13 +120,12 @@ export function CommandCenter() {
                 <Widget widget={w("sales", o!.salesView.type, o!.salesView.type === "pipeline" ? "Pipeline overview" : "Top products", q(o!.salesView.metric, { dimension: o!.salesView.dimension as never, granularity: "none" }))} businessId={b.id} timezone={b.timezone} dashboardRange={range} />
               </div>
             )}
-            <ActiveAlerts />
           </div>
 
           {o!.goals.length > 0 && (
             <section aria-labelledby="goals-h">
               <h2 id="goals-h" className="mb-3 text-[15px] font-semibold">Goals</h2>
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 [&>*]:min-w-0">
                 {o!.goals.map((g) => (
                   <div key={g.id} className="h-44"><Widget widget={w(`goal-${g.id}`, "goal", g.title, null, { options: { target: null, goalId: g.id, showComparison: false, stacked: false } })} businessId={b.id} timezone={b.timezone} dashboardRange={range} /></div>
                 ))}
@@ -106,20 +133,7 @@ export function CommandCenter() {
             </section>
           )}
 
-          <div className="grid gap-4 xl:grid-cols-3">
-            <div className="h-72 xl:col-span-2"><Widget widget={w("fresh", "freshness", "Connection health", null)} businessId={b.id} timezone={b.timezone} dashboardRange={range} /></div>
-            <Card title="Ask the assistant" description="Suggested for this business">
-              <ul className="space-y-2">
-                {o!.suggestedQuestions.map((s) => (
-                  <li key={s}>
-                    <Link to={`assistant?q=${encodeURIComponent(s)}`} className="flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm text-muted transition-colors hover:border-accent/40 hover:text-fg">
-                      <MessageSquare className="size-4 shrink-0 text-accent" />{s}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </Card>
-          </div>
+          <div className="h-72"><Widget widget={w("fresh", "freshness", "Connection health", null)} businessId={b.id} timezone={b.timezone} dashboardRange={range} /></div>
 
           {o!.activity.length > 0 && (
             <Card title="Recent activity">
@@ -175,33 +189,6 @@ function BriefingCard() {
         </p>
       )}
     </section>
-  );
-}
-
-function ActiveAlerts() {
-  const b = useBusiness();
-  const list = useInsights(b.id, "open");
-  const items = (list.data?.insights ?? []).filter((i) => i.severity === "critical" || i.severity === "warning").slice(0, 3);
-  return (
-    <Card title="Active alerts" description="From insight rules and automations" actions={<ButtonLink size="sm" variant="ghost" to="insights">All insights</ButtonLink>}>
-      {list.isLoading ? <Skeleton className="h-24" /> : items.length ? (
-        <ul className="space-y-2">
-          {items.map((i) => {
-            const S = SEVERITY_STYLE[i.severity];
-            return (
-              <li key={i.id}>
-                <Link to="insights" className="flex items-start gap-2.5 rounded-lg border border-line p-2.5 text-sm hover:border-line-strong">
-                  <S.icon className={`mt-0.5 size-4 shrink-0 ${i.severity === "critical" ? "text-danger" : "text-warning"}`} aria-hidden />
-                  <span className="min-w-0"><span className="block font-medium text-fg">{i.title}</span><span className="line-clamp-2 text-muted">{i.finding}</span></span>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      ) : (
-        <div className="flex items-start gap-3 text-sm text-muted"><Bell className="mt-0.5 size-4 shrink-0 text-subtle" />No active alerts. {list.data?.lastDetectedAt ? `Last checked ${new Date(list.data.lastDetectedAt).toLocaleString()}.` : "Checks run daily and after each sync."}</div>
-      )}
-    </Card>
   );
 }
 
@@ -266,7 +253,7 @@ function GettingStarted({ setup }: { setup: Overview["setup"] }) {
   return (
     <Card title="Getting started" description={`${steps.length - left} of ${steps.length} done`}
       actions={<Button size="sm" variant="ghost" onClick={async () => { await patch("/auth/me/preferences", { onboarding: { [key]: true } }).catch(() => undefined); qc.invalidateQueries({ queryKey: ["me"] }); }}>Dismiss</Button>}>
-      <ol className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+      <ol className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
         {steps.map((s) => (
           <li key={s.label} className={cn("flex items-center gap-3 rounded-lg border px-3 py-2.5 text-sm", s.done ? "border-line text-muted" : "border-line-strong")}>
             {s.done ? <CheckCircle2 className="size-4 shrink-0 text-success" aria-label="Done" /> : <Circle className="size-4 shrink-0 text-subtle" aria-label="Not done" />}

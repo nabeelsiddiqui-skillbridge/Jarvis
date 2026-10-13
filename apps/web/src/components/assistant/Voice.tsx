@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Mic, MicOff, PhoneOff, Repeat } from "lucide-react";
 import type { Business } from "@bca/shared";
 import { cn } from "@/lib/cn";
+import { JarvisCore, type CoreState } from "@/components/jarvis/JarvisCore";
 import { BrowserListener, DeepgramListener, SentenceChunker, Speaker, browserSpeechSupported, micErrorMessage, startVoiceSession, type Listener } from "@/lib/voice";
 
 /** idle = voice on but not listening (click-to-talk); retrieving = tools running; analyzing = writing the answer. */
@@ -201,22 +202,9 @@ const LABEL: Record<VoiceState, string> = {
   retrieving: "Retrieving your data…", analyzing: "Analyzing…", speaking: "Speaking — talk to interrupt", error: "Voice stopped",
 };
 
-/** Restrained animated orb; motion is disabled for reduced-motion users. */
-function Orb({ state }: { state: VoiceState }) {
-  const active = state === "listening" || state === "speaking";
-  const busy = state === "retrieving" || state === "analyzing" || state === "starting";
-  return (
-    <span aria-hidden className={cn("relative grid size-9 shrink-0 place-items-center rounded-full", state === "error" ? "bg-danger/15" : "bg-accent/15")}>
-      {state === "error" ? <MicOff className="size-4 text-danger" /> : (
-        <span className="flex h-4 items-end gap-[3px]">
-          {[0, 1, 2, 3].map((i) => (
-            <span key={i} className={cn("w-[3px] rounded-full bg-accent motion-reduce:animate-none", active ? "animate-[voicebar_0.9s_ease-in-out_infinite]" : busy ? "animate-[voicebar_1.6s_ease-in-out_infinite] opacity-70" : "opacity-50")}
-              style={{ height: active ? `${[60, 100, 75, 45][i]}%` : "35%", animationDelay: `${i * 0.12}s` }} />
-          ))}
-        </span>
-      )}
-    </span>
-  );
+/** How the JARVIS core reflects the voice loop. */
+export function voiceCore(s: VoiceState): CoreState {
+  return s === "off" || s === "idle" ? "standby" : s;
 }
 
 export function VoiceBar({ voice, compact }: { voice: VoiceMode; compact?: boolean }) {
@@ -225,7 +213,7 @@ export function VoiceBar({ voice, compact }: { voice: VoiceMode; compact?: boole
   return (
     <div className={cn("border-t border-accent/30 bg-accent/[0.06]", compact ? "px-3 py-2" : "px-3 py-2.5 md:px-6")} role="status" aria-live="polite">
       <div className={cn("mx-auto flex items-center gap-3", !compact && "max-w-3xl")}>
-        <Orb state={voice.state} />
+        <JarvisCore state={voiceCore(voice.state)} size={40} boot={false} className="shrink-0" />
         <div className="min-w-0 flex-1">
           <p className="text-[13px] font-medium text-fg">{voice.state === "error" ? voice.error : label}</p>
           {voice.transcript && voice.state !== "error" && <p className="truncate text-xs text-muted">“{voice.transcript}”</p>}

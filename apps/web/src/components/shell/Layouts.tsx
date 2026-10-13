@@ -20,6 +20,8 @@ function AppShell({ workspaceId, business, navBusiness = business, title, childr
   const [drawer, setDrawer] = useState(false);
   // The Assistant page is a full-height chat: no page padding, and no duplicate side panel.
   const fullBleed = Boolean(useMatch("/app/b/:businessId/assistant"));
+  // The command deck already puts JARVIS in the middle of the page.
+  const onDeck = Boolean(useMatch("/app/b/:businessId"));
   const [assistantOpen, setAssistantOpen] = useState(me.data?.preferences.assistantPanelOpen ?? true);
   const toggleAssistant = () => {
     const next = !assistantOpen;
@@ -51,7 +53,7 @@ function AppShell({ workspaceId, business, navBusiness = business, title, childr
       </div>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar business={business} title={title} workspaceId={workspaceId} onMenu={() => setDrawer(true)} assistantOpen={assistantOpen} onToggleAssistant={toggleAssistant} showAssistantToggle={!fullBleed} />
+        <TopBar business={business} title={title} workspaceId={workspaceId} onMenu={() => setDrawer(true)} assistantOpen={assistantOpen} onToggleAssistant={toggleAssistant} showAssistantToggle={!fullBleed && !onDeck} />
         <div className="flex min-h-0 flex-1">
           {fullBleed ? (
             <main id="main" tabIndex={-1} className="flex min-w-0 flex-1 flex-col overflow-hidden pb-[calc(3rem+env(safe-area-inset-bottom))] focus:outline-none lg:pb-0">{children}</main>
@@ -60,7 +62,7 @@ function AppShell({ workspaceId, business, navBusiness = business, title, childr
               <div className="mx-auto max-w-[1400px]">{support && <SupportBanner business={business!} workspaceId={workspaceId} />}{children}</div>
             </main>
           )}
-          {business && assistantOpen && !fullBleed && !support && <AssistantPanel business={business} onClose={toggleAssistant} />}
+          {business && assistantOpen && !fullBleed && !onDeck && !support && <AssistantPanel business={business} onClose={toggleAssistant} />}
         </div>
       </div>
       <MobileTabBar business={navBusiness} workspaceId={workspaceId} onMore={() => setDrawer(true)} />
