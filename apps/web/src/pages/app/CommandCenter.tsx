@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, Bell, Bot, FlaskConical, MessageSquare, Plug, Sparkles } from "lucide-react";
+import { Activity, Bell, Bot, CheckCircle2, Circle, FlaskConical, MessageSquare, Plug, Sparkles } from "lucide-react";
 import { can, type DateRangeSpec, type SourceInfo, type WidgetSpec, type WidgetType } from "@bca/shared";
 import { canWorkspace } from "@bca/shared";
-import { get, post, errorMessage } from "@/lib/api";
+import { get, patch, post, errorMessage } from "@/lib/api";
+import { cn } from "@/lib/cn";
 import { useBusiness } from "@/lib/business";
 import { useMe } from "@/lib/session";
 import { Button, ButtonLink } from "@/components/ui/Button";
@@ -21,6 +22,7 @@ import { useInsights, useLatestBriefing } from "@/lib/insights";
 
 interface Overview {
   isDemo: boolean;
+  setup: { connected: boolean; dataImported: boolean; dashboard: boolean; asked: boolean; goals: boolean; automation: boolean };
   kpis: string[];
   revenueTrend: string | null;
   acquisitionTrend: string | null;
@@ -63,6 +65,8 @@ export function CommandCenter() {
           <p><b className="text-demo">Demo business.</b> <span className="text-muted">Every figure here is generated sample data from simulated accounts. Your real businesses never include demo data.</span></p>
         </div>
       )}
+
+      {o && !o.isDemo && !b.support && <GettingStarted setup={o.setup} />}
 
       {overview.isPending ? (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-36" />)}</div>
@@ -240,4 +244,37 @@ const kpiTitle = (k: string) => KPI_TITLES[k] ?? k;
 function greeting() {
   const h = new Date().getHours();
   return h < 12 ? "morning" : h < 18 ? "afternoon" : "evening";
+}
+
+/** Remaining setup steps for a real business; hidden when done or dismissed. */
+function GettingStarted({ setup }: { setup: Overview["setup"] }) {
+  const b = useBusiness();
+  const me = useMe();
+  const qc = useQueryClient();
+  const key = `checklist:${b.id}`;
+  const dismissed = Boolean(me.data?.preferences.onboarding?.[key]);
+  const steps = [
+    { done: setup.connected, label: "Connect a data source", to: "connections", cta: "Connect" },
+    { done: setup.dataImported, label: "Finish the first import", to: "connections", cta: "View progress", hidden: !setup.connected },
+    { done: setup.dashboard, label: "Create your first dashboard", to: "dashboards", cta: "Create" },
+    { done: setup.asked, label: "Ask the assistant a question", to: "assistant", cta: "Ask" },
+    { done: setup.goals, label: "Set business goals", to: "settings", cta: "Add goals" },
+    { done: setup.automation, label: "Schedule a daily briefing", to: "automations", cta: "Set up" },
+  ].filter((s) => !s.hidden);
+  const left = steps.filter((s) => !s.done).length;
+  if (dismissed || !left) return null;
+  return (
+    <Card title="Getting started" description={`${steps.length - left} of ${steps.length} done`}
+      actions={<Button size="sm" variant="ghost" onClick={async () => { await patch("/auth/me/preferences", { onboarding: { [key]: true } }).catch(() => undefined); qc.invalidateQueries({ queryKey: ["me"] }); }}>Dismiss</Button>}>
+      <ol className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        {steps.map((s) => (
+          <li key={s.label} className={cn("flex items-center gap-3 rounded-lg border px-3 py-2.5 text-sm", s.done ? "border-line text-muted" : "border-line-strong")}>
+            {s.done ? <CheckCircle2 className="size-4 shrink-0 text-success" aria-label="Done" /> : <Circle className="size-4 shrink-0 text-subtle" aria-label="Not done" />}
+            <span className={cn("flex-1", s.done && "line-through decoration-white/20")}>{s.label}</span>
+            {!s.done && <Link to={`/app/b/${b.id}/${s.to}`} className="text-xs font-medium text-accent hover:underline">{s.cta}</Link>}
+          </li>
+        ))}
+      </ol>
+    </Card>
+  );
 }

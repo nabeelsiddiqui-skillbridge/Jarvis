@@ -183,7 +183,8 @@ export const taskInput = z.object({
 
 export interface AppNotification {
   id: string;
-  businessId: string;
+  businessId: string | null;
+  /** Business name, or the workspace name for workspace-level notices. */
   businessName: string;
   kind: string;
   title: string;

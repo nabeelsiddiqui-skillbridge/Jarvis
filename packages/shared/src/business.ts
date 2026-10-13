@@ -65,6 +65,8 @@ export interface Business {
   isDemo: boolean;
   createdAt: string;
   role: "owner" | "admin" | "analyst" | "viewer";
+  /** Viewing through a platform administrator's read-only support grant (not a member). */
+  support?: boolean;
 }
 
 export interface Goal {

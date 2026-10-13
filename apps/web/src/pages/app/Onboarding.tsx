@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useNavigate } from "react-router";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, Check, Plus, Trash2 } from "lucide-react";
-import { post, patch, errorMessage } from "@/lib/api";
+import { get, post, patch, errorMessage } from "@/lib/api";
 import { rememberBusiness } from "@/lib/business";
 import { useMe } from "@/lib/session";
 import { cn } from "@/lib/cn";
@@ -11,8 +11,67 @@ import { Button } from "@/components/ui/Button";
 import { Field, Input, Select } from "@/components/ui/Field";
 import { BusinessForm } from "@/components/business/BusinessForm";
 import { DemoButton } from "@/components/business/DemoButton";
+import { Skeleton } from "@/components/ui/Spinner";
 
 const STEPS = ["Workspace", "Business", "Goals", "Connect", "Dashboard", "Ask"] as const;
+
+const FIRST_QUESTIONS = [
+  "Is any of our data stale or missing?",
+  "How did sales do in the last 30 days compared with the previous period?",
+  "Which channels brought the most sessions this month?",
+  "Build me a marketing performance dashboard",
+];
+
+interface TemplateInfo { id: string; name: string; description: string; recommended: boolean; widgetCount: number }
+
+/** Step 5: a first dashboard from a template — only widgets the connected data can fill are included. */
+function FirstDashboard({ businessId, onDone }: { businessId: string; onDone: () => void }) {
+  const templates = useQuery({ queryKey: ["b", businessId, "templates"], queryFn: ({ signal }) => get<TemplateInfo[]>(`/businesses/${businessId}/dashboard-templates`, signal) });
+  const usable = (templates.data ?? []).filter((t) => t.widgetCount > 0).sort((a, b) => Number(b.recommended) - Number(a.recommended));
+  const [choice, setChoice] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const selected = choice ?? usable[0]?.id ?? null;
+  const create = async () => {
+    const t = usable.find((x) => x.id === selected);
+    if (!t) return;
+    setBusy(true); setError(null);
+    try {
+      await post(`/businesses/${businessId}/dashboards`, { name: t.name, template: t.id, visibility: "business" });
+      onDone();
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="space-y-5">
+      <div>
+        <h1 className="text-2xl font-semibold">Create your first dashboard</h1>
+        <p className="mt-1 text-sm text-muted">Start from a template; you can rearrange, resize and edit every widget afterwards, or ask the assistant to build one.</p>
+      </div>
+      {templates.isLoading ? <Skeleton className="h-32" /> : usable.length ? (
+        <div role="radiogroup" aria-label="Dashboard template" className="grid gap-2">
+          {usable.map((t) => (
+            <button key={t.id} type="button" role="radio" aria-checked={selected === t.id} onClick={() => setChoice(t.id)}
+              className={cn("rounded-lg border px-4 py-3 text-left", selected === t.id ? "border-accent bg-accent/10" : "border-line bg-panel hover:border-line-strong")}>
+              <span className="font-medium">{t.name}</span>{t.recommended && <span className="ml-2 text-xs text-accent">Recommended</span>}
+              <span className="mt-0.5 block text-sm text-muted">{t.description} · {t.widgetCount} widgets your data can fill</span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="rounded-lg border border-line bg-panel px-4 py-3 text-sm text-muted">Dashboards fill from connected data, and nothing is connected yet. Skip for now — once a source finishes its first import, the Command Center will offer to create one.</p>
+      )}
+      {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+      <div className="flex justify-between gap-2">
+        <Button variant="ghost" onClick={onDone}>Skip for now</Button>
+        <Button variant="primary" loading={busy} disabled={!selected} onClick={create}>Create dashboard <ArrowRight className="size-4" /></Button>
+      </div>
+    </div>
+  );
+}
 
 export function Onboarding() {
   const me = useMe();
@@ -57,10 +116,10 @@ export function Onboarding() {
     }
   };
 
-  const finish = async () => {
+  const finish = async (to?: string) => {
     await patch("/auth/me/preferences", { onboarding: { completed: true } }).catch(() => undefined);
     await qc.invalidateQueries({ queryKey: ["me"] });
-    nav(businessId ? `/app/b/${businessId}` : "/app", { replace: true });
+    nav(to ?? (businessId ? `/app/b/${businessId}` : "/app"), { replace: true });
   };
 
   return (
@@ -148,14 +207,23 @@ export function Onboarding() {
             </div>
           )}
 
-          {step >= 4 && (
+          {step === 4 && businessId && <FirstDashboard businessId={businessId} onDone={() => setStep(5)} />}
+
+          {step === 5 && (
             <div className="space-y-5">
-              <h1 className="text-2xl font-semibold">You're set up</h1>
-              <p className="text-sm text-muted">
-                Your workspace and business are ready. Connect data whenever you like; dashboards and the assistant use only the sources you connect.
-                The Command Center lists what's left to set up.
-              </p>
-              <div className="flex justify-end"><Button variant="primary" onClick={finish}>Go to Command Center <ArrowRight className="size-4" /></Button></div>
+              <div>
+                <h1 className="text-2xl font-semibold">Ask your first question</h1>
+                <p className="mt-1 text-sm text-muted">The assistant answers from this business's connected data only and shows its evidence. With nothing connected yet, it will tell you what's missing rather than guess.</p>
+              </div>
+              <ul className="grid gap-2">
+                {FIRST_QUESTIONS.map((q) => (
+                  <li key={q}><button type="button" onClick={() => finish(`/app/b/${businessId}/assistant?q=${encodeURIComponent(q)}`)} className="w-full rounded-lg border border-line bg-panel px-4 py-3 text-left text-sm hover:border-accent/50 focus-visible:border-accent">{q}</button></li>
+                ))}
+              </ul>
+              <div className="flex flex-wrap justify-between gap-2">
+                <Button variant="ghost" onClick={() => finish()}>Skip — go to the Command Center</Button>
+                <Button variant="primary" onClick={() => finish(`/app/b/${businessId}/assistant`)}>Open the assistant <ArrowRight className="size-4" /></Button>
+              </div>
             </div>
           )}
         </div>

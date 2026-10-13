@@ -13,6 +13,7 @@ import { saveCredentials } from "../connectors/credentials.js";
 import { ProviderError } from "../connectors/http.js";
 import { catalog, connectorStatus, getConnector } from "../connectors/registry.js";
 import { enqueue } from "../jobs/queue.js";
+import { assertWithinLimit } from "../billing/entitlements.js";
 
 export const connectionsRouter = Router();
 
@@ -101,6 +102,7 @@ connectionsRouter.post("/businesses/:businessId/connections/:provider/authorize"
 
   const url = await inBusiness(req, req.params.businessId, "connection.manage", async ({ business, userId }) => {
     if (business.is_demo) throw badRequest("Demo businesses can't connect real accounts. Create a real business first.");
+    if (!body.connectionId) await assertWithinLimit(business.workspace_id, "connections");
     const state = randomToken(24);
     let authUrl: string;
     try {

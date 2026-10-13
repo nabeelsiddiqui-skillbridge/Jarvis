@@ -15,6 +15,9 @@ export async function scheduleDueWork() {
   await recoverStuck();
   await scheduleAutomations();
   await expireOld(pool);
+  // Daily data-retention purge.
+  const purged = await pool.query(`SELECT 1 FROM jobs WHERE type = 'retention.purge' AND created_at > now() - interval '20 hours' LIMIT 1`);
+  if (!purged.rowCount) await enqueue(pool, { type: "retention.purge", dedupeKey: "retention", priority: -3 });
   // Daily insight detection for businesses with data (also runs after each sync).
   const due = await pool.query(
     `SELECT b.id, b.workspace_id FROM businesses b

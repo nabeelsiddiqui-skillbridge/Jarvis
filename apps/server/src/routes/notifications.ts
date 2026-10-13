@@ -12,7 +12,7 @@ notificationsRouter.use(requireUser);
 notificationsRouter.get("/notifications", async (req, res) => {
   const out = await withUser(req.user!.id, async (db) => {
     const { rows } = await db.query(
-      `SELECT n.*, b.name AS business_name FROM notifications n JOIN businesses b ON b.id = n.business_id ORDER BY n.created_at DESC LIMIT 50`,
+      `SELECT n.*, coalesce(b.name, w.name) AS business_name FROM notifications n LEFT JOIN businesses b ON b.id = n.business_id JOIN workspaces w ON w.id = n.workspace_id ORDER BY n.created_at DESC LIMIT 50`,
     );
     const unread = (await db.query(`SELECT count(*)::int AS n FROM notifications WHERE read_at IS NULL`)).rows[0].n;
     return { unread, items: rows.map((r): AppNotification => ({ id: r.id, businessId: r.business_id, businessName: r.business_name, kind: r.kind, title: r.title, body: r.body, link: r.link, readAt: r.read_at, createdAt: r.created_at })) };

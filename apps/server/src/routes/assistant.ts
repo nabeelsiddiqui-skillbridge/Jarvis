@@ -9,6 +9,8 @@ import { conflict, notFound, prerequisite } from "../lib/errors.js";
 import { rateLimit } from "../lib/rateLimit.js";
 import { assistantConfigured, runTurn } from "../assistant/agent.js";
 import { getDashboard, getVersionSpec, saveDashboard, saveNewDashboard } from "../dashboards/store.js";
+import { assertWithinLimit } from "../billing/entitlements.js";
+import { assertEnabled, flagsFor } from "../lib/flags.js";
 
 /**
  * AI assistant API. Conversations are private to their user and scoped to one
@@ -20,10 +22,15 @@ assistantRouter.use(requireUser);
 const DAILY_LIMIT = Number(process.env.ASSISTANT_DAILY_MESSAGES ?? 300);
 
 assistantRouter.get("/businesses/:businessId/assistant/status", async (req, res) => {
-  await inBusiness(req, req.params.businessId, "assistant.use", async () => undefined);
+  const business = await inBusiness(req, req.params.businessId, "assistant.use", async ({ business }) => business);
+  const flags = await flagsFor(business.workspace_id);
+  const reason = !assistantConfigured() ? "The platform operator hasn't configured an AI provider key (ANTHROPIC_API_KEY), so the assistant can't answer yet."
+    : !flags.assistant ? "The AI assistant is turned off for this workspace by the platform administrator." : null;
   res.json({
-    configured: assistantConfigured(),
-    reason: assistantConfigured() ? null : "The platform operator hasn't configured an AI provider key (ANTHROPIC_API_KEY), so the assistant can't answer yet.",
+    configured: !reason,
+    reason,
+    voice: flags.voice,
+    voiceReason: flags.voice ? null : "Voice conversations are turned off for this workspace by the platform administrator.",
     dailyLimit: DAILY_LIMIT,
   });
 });
@@ -97,6 +104,8 @@ assistantRouter.post(
     if (!isUuid(req.params.conversationId)) throw notFound("Conversation");
     await inBusiness(req, req.params.businessId, "assistant.use", async ({ db, business, userId }) => {
       if (!assistantConfigured()) throw prerequisite("The AI assistant isn't configured on this platform yet: an administrator must set ANTHROPIC_API_KEY.");
+      await assertEnabled("assistant", business.workspace_id);
+      await assertWithinLimit(business.workspace_id, "aiMessages");
       const conv = await db.query(`SELECT 1 FROM conversations WHERE id = $1 AND business_id = $2`, [req.params.conversationId, business.id]);
       if (!conv.rowCount) throw notFound("Conversation");
       const today = await db.query(

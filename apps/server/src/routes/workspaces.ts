@@ -3,12 +3,13 @@ import { Router } from "express";
 import { z } from "zod";
 import { BUSINESS_ROLES } from "@bca/shared";
 import { config } from "../config.js";
-import { pool, withUser } from "../db/pool.js";
+import { pool, withSystem, withUser } from "../db/pool.js";
 import { requireUser } from "../auth/sessions.js";
 import { inWorkspace, isUuid } from "../auth/access.js";
 import { audit } from "../lib/audit.js";
 import { randomToken, sha256 } from "../lib/crypto.js";
 import { badRequest, conflict, forbidden, notFound } from "../lib/errors.js";
+import { assertWithinLimit } from "../billing/entitlements.js";
 
 export const workspacesRouter = Router();
 workspacesRouter.use(requireUser);
@@ -93,6 +94,7 @@ workspacesRouter.post("/:workspaceId/invitations", async (req, res) => {
     .parse(req.body);
   const token = randomToken(24);
   const result = await inWorkspace(req, req.params.workspaceId, "workspace.members.manage", async ({ db, workspaceId, userId }) => {
+    await assertWithinLimit(workspaceId, "members");
     if (body.businessGrants.length) {
       const ids = body.businessGrants.map((g) => g.businessId);
       const { rows } = await db.query("SELECT count(*)::int AS n FROM businesses WHERE workspace_id = $1 AND id = ANY($2::uuid[])", [workspaceId, ids]);
@@ -217,3 +219,30 @@ invitesRouter.post("/:token/accept", requireUser, async (req, res) => {
     client.release();
   }
 });
+
+// ------------------------------------------------------------------ support access (owner view)
+
+/** Workspace owners see every platform support grant for their workspace and can end it. */
+workspacesRouter.get("/:workspaceId/support-access", async (req, res) => {
+  const { workspaceId } = await inWorkspace(req, req.params.workspaceId, "workspace.manage", async (c) => c);
+  const rows = await withSystem(async (db) => (await db.query(
+    `SELECT g.id, g.reason, g.created_at, g.expires_at, g.revoked_at, u.email AS admin_email,
+            (SELECT count(*) FROM audit_logs a WHERE a.workspace_id = g.workspace_id AND a.actor_user_id = g.admin_user_id AND a.action = 'support.data_viewed'
+               AND a.created_at BETWEEN g.created_at AND coalesce(g.revoked_at, g.expires_at))::int AS views
+       FROM support_access_grants g JOIN users u ON u.id = g.admin_user_id WHERE g.workspace_id = $1 ORDER BY g.created_at DESC LIMIT 20`,
+    [workspaceId],
+  )).rows);
+  res.json(rows.map((r) => ({ id: r.id, reason: r.reason, adminEmail: r.admin_email, createdAt: r.created_at, expiresAt: r.expires_at, revokedAt: r.revoked_at, views: r.views, active: !r.revoked_at && new Date(r.expires_at) > new Date() })));
+});
+
+workspacesRouter.post("/:workspaceId/support-access/:grantId/revoke", async (req, res) => {
+  const { workspaceId, userId } = await inWorkspace(req, req.params.workspaceId, "workspace.manage", async (c) => c);
+  if (!isUuid(req.params.grantId)) throw notFound("Active support access");
+  await withSystem(async (db) => {
+    const g = await db.query(`UPDATE support_access_grants SET revoked_at = now() WHERE id = $1 AND workspace_id = $2 AND revoked_at IS NULL RETURNING id`, [req.params.grantId, workspaceId]);
+    if (!g.rowCount) throw notFound("Active support access");
+    await audit(db, { workspaceId, actorUserId: userId, action: "support.access_revoked", targetType: "support_grant", targetId: String(req.params.grantId), ip: req.ip });
+  });
+  res.json({ ok: true });
+});
+

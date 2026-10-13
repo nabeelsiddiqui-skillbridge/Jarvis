@@ -1,5 +1,9 @@
-import { ArrowRight, BarChart3, Bot, Building2, ShieldCheck } from "lucide-react";
+import { ArrowRight, BarChart3, Bot, Building2, CheckCircle2, FileText, Lightbulb, Mic, Plug, ShieldCheck, Workflow } from "lucide-react";
 import { ButtonLink } from "@/components/ui/Button";
+
+/** Live connectors (working integrations) and planned ones, labelled as such. Mirrors the server's connector catalog. */
+export const LIVE_CONNECTORS = ["Shopify", "Google Analytics 4", "Google Search Console", "Google Ads", "HubSpot"];
+export const PLANNED_CONNECTORS = ["Meta Ads", "Stripe", "Klaviyo", "Salesforce", "WooCommerce", "TikTok", "LinkedIn", "QuickBooks & Xero", "CSV & Google Sheets"];
 
 export function Home() {
   return (
@@ -15,12 +19,14 @@ export function Home() {
             Connect your store, analytics, ads and CRM. Ask questions by voice or text, get answers that cite their sources, and build live dashboards in seconds — for one business or a whole client portfolio.
           </p>
           <div className="mt-9 flex flex-wrap justify-center gap-3">
-            <ButtonLink to="/signup" variant="primary" size="lg">Start free <ArrowRight className="size-4" /></ButtonLink>
-            <ButtonLink to="/login" variant="outline" size="lg">Sign in</ButtonLink>
+            <ButtonLink to="/signup" variant="primary" size="lg">Start a 14-day trial <ArrowRight className="size-4" /></ButtonLink>
+            <ButtonLink to="/pricing" variant="outline" size="lg">See pricing</ButtonLink>
           </div>
+          <p className="mt-4 text-xs text-subtle">No card needed. Explore a clearly labelled demo business before connecting anything.</p>
         </div>
       </section>
-      <section className="mx-auto grid max-w-6xl gap-5 px-5 pb-24 sm:grid-cols-2 lg:grid-cols-4">
+
+      <section className="mx-auto grid max-w-6xl gap-5 px-5 pb-20 sm:grid-cols-2 lg:grid-cols-4" aria-label="Highlights">
         {[
           { icon: Building2, title: "Multi-business", body: "Separate businesses with their own connections, dashboards and permissions. Built for owners, teams and agencies." },
           { icon: BarChart3, title: "Live dashboards", body: "Drag, resize and edit widgets backed by validated metric definitions — never invented numbers." },
@@ -28,11 +34,85 @@ export function Home() {
           { icon: ShieldCheck, title: "Secure by design", body: "Encrypted tokens, row-level security, audited approvals for every external action." },
         ].map((f) => (
           <div key={f.title} className="panel p-6">
-            <f.icon className="size-6 text-accent" />
-            <h3 className="mt-4 font-semibold">{f.title}</h3>
+            <f.icon className="size-6 text-accent" aria-hidden />
+            <h2 className="mt-4 font-semibold">{f.title}</h2>
             <p className="mt-2 text-sm text-muted">{f.body}</p>
           </div>
         ))}
+      </section>
+
+      <section className="mx-auto max-w-6xl px-5 pb-20" aria-labelledby="how-h">
+        <h2 id="how-h" className="text-center text-2xl font-semibold sm:text-3xl">From connected accounts to decisions</h2>
+        <ol className="mt-10 grid gap-5 md:grid-cols-3">
+          {[
+            { icon: Plug, title: "1. Connect", body: "Authorize Shopify, Google and HubSpot with the minimum read scopes, pick the exact store, property or account, and watch the first import progress." },
+            { icon: Mic, title: "2. Ask", body: "“How did sales do last week, and why?” The assistant queries your normalized metrics and shows the evidence: source, period, comparison and freshness." },
+            { icon: Lightbulb, title: "3. Act", body: "Daily briefings, alerts and insights surface what changed. Supported changes — like pausing a campaign — are proposed, approved and logged." },
+          ].map((s) => (
+            <li key={s.title} className="panel p-6">
+              <s.icon className="size-6 text-violet" aria-hidden />
+              <h3 className="mt-4 font-semibold">{s.title}</h3>
+              <p className="mt-2 text-sm text-muted">{s.body}</p>
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      <section className="mx-auto grid max-w-6xl items-center gap-10 px-5 pb-20 lg:grid-cols-2" aria-labelledby="evidence-h">
+        <div>
+          <h2 id="evidence-h" className="text-2xl font-semibold sm:text-3xl">Answers you can check</h2>
+          <p className="mt-4 text-muted">Every figure comes from a tool call against your own data — never from the model's imagination. Store sales, analytics revenue, ad-attributed value and CRM pipeline stay separate, because they measure different things.</p>
+          <ul className="mt-6 space-y-2 text-sm">
+            {["Citations link each number to its evidence card", "Stale or missing sources are flagged, not hidden", "Delayed provider reporting is never presented as real-time", "Possible explanations are labelled as possibilities"].map((t) => (
+              <li key={t} className="flex gap-2"><CheckCircle2 className="mt-0.5 size-4 shrink-0 text-accent" aria-hidden />{t}</li>
+            ))}
+          </ul>
+        </div>
+        <figure className="panel p-5" aria-label="Example assistant answer">
+          <p className="ml-auto w-fit max-w-[85%] rounded-2xl rounded-br-md bg-accent/15 px-3.5 py-2 text-sm">How did net sales do last week?</p>
+          <div className="mt-4 space-y-3 text-sm">
+            <p>Net sales were <strong>$48,210</strong> for the 7 days to Sunday, down <strong>8.4%</strong> on the previous 7 days <span className="rounded bg-accent/15 px-1.5 text-xs text-accent">E1</span>. The drop came mostly from the Trail Runner jacket <span className="rounded bg-accent/15 px-1.5 text-xs text-accent">E2</span>.</p>
+            <div className="rounded-lg border border-line bg-panel-2 p-3 text-xs text-muted">
+              <p className="font-medium text-fg">E1 · Store net sales</p>
+              <p>Shopify · Example store · 7 days vs previous 7 · synced 12 min ago</p>
+            </div>
+          </div>
+          <figcaption className="mt-3 text-[11px] text-subtle">Illustrative example; figures are not from a real business.</figcaption>
+        </figure>
+      </section>
+
+      <section className="mx-auto max-w-6xl px-5 pb-20" aria-labelledby="more-h">
+        <h2 id="more-h" className="sr-only">More features</h2>
+        <div className="grid gap-5 md:grid-cols-3">
+          {[
+            { icon: FileText, title: "Briefings & reports", body: "A daily briefing and weekly report per business, with evidence, exports and print-ready layouts." },
+            { icon: Workflow, title: "Automations", body: "Threshold alerts, connection-failure alerts and tasks from new insights — each run recorded, never duplicated." },
+            { icon: ShieldCheck, title: "Approved actions", body: "Pause a campaign, change a budget or move a deal: current and proposed values, approval bound to the exact change, executed once." },
+          ].map((f) => (
+            <div key={f.title} className="panel p-6">
+              <f.icon className="size-6 text-accent" aria-hidden />
+              <h3 className="mt-4 font-semibold">{f.title}</h3>
+              <p className="mt-2 text-sm text-muted">{f.body}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="mx-auto max-w-6xl px-5 pb-24" aria-labelledby="connectors-h">
+        <h2 id="connectors-h" className="text-center text-2xl font-semibold sm:text-3xl">Integrations</h2>
+        <div className="mt-8 grid gap-5 md:grid-cols-2">
+          <div className="panel p-6">
+            <h3 className="font-semibold">Available now</h3>
+            <ul className="mt-3 flex flex-wrap gap-2">{LIVE_CONNECTORS.map((c) => <li key={c} className="rounded-full border border-success/30 bg-success/10 px-3 py-1 text-sm text-success">{c}</li>)}</ul>
+          </div>
+          <div className="panel p-6">
+            <h3 className="font-semibold">Planned <span className="text-sm font-normal text-muted">— not yet available</span></h3>
+            <ul className="mt-3 flex flex-wrap gap-2">{PLANNED_CONNECTORS.map((c) => <li key={c} className="rounded-full border border-line px-3 py-1 text-sm text-muted">{c}</li>)}</ul>
+          </div>
+        </div>
+        <div className="mt-12 text-center">
+          <ButtonLink to="/signup" variant="primary" size="lg">Start a 14-day trial <ArrowRight className="size-4" /></ButtonLink>
+        </div>
       </section>
     </main>
   );

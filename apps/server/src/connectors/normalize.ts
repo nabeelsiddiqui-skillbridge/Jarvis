@@ -42,8 +42,11 @@ export interface FactInput {
  * one transaction so readers never see a half-written day.
  */
 export async function replaceFacts(ctx: SyncContext, dates: string[], compute: (date: string) => Promise<FactInput[]> | FactInput[], ownedMetrics: string[]) {
-  if (!dates.length) return 0;
   const { connection: c, asset: a, db } = ctx;
+  // Days whose source records were removed by the retention policy keep their stored facts.
+  const frozen = (await db.query(`SELECT purged_before FROM connection_assets WHERE id = $1`, [a.id])).rows[0]?.purged_before as string | null | undefined;
+  if (frozen) dates = dates.filter((d) => d >= frozen);
+  if (!dates.length) return 0;
   const rows: (FactInput & { date: string })[] = [];
   for (const d of dates) for (const f of await compute(d)) rows.push({ ...f, date: d });
   await db.query("BEGIN");

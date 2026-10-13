@@ -98,6 +98,7 @@ export async function buildReport(db: pg.PoolClient, business: Biz, kind: Report
         system: `${NARRATIVE_RULES}\n\nTask: write the ${kind === "daily_briefing" ? "daily briefing" : "report summary"} for the business team: a short paragraph on how the period went, then up to three bullet points ("- ") on what deserves attention, each citing evidence ids (R1, R2…). Under 150 words.${business.is_demo ? " This is a demo business with sample data; say so once." : ""}`,
         user: JSON.stringify(payload),
         maxTokens: 3000,
+        usage: { workspaceId: business.workspace_id, businessId: business.id, feature: "report_summary" },
       });
       narrative = r.text;
       narrativeModel = r.model;

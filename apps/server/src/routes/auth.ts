@@ -14,6 +14,8 @@ import {
 import { audit } from "../lib/audit.js";
 import { AppError, conflict, forbidden, unauthorized } from "../lib/errors.js";
 import { rateLimit } from "../lib/rateLimit.js";
+import { flagsFor } from "../lib/flags.js";
+import { effectivePlan, loadSubscription } from "../billing/entitlements.js";
 
 export const authRouter = Router();
 
@@ -71,9 +73,10 @@ authRouter.get("/me", requireUser, async (req, res) => {
     const prefs = await db.query("SELECT last_workspace_id, recent_business_ids, onboarding, assistant_panel_open FROM user_preferences WHERE user_id = $1", [user.id]);
     return { workspaces: workspaces.rows, prefs: prefs.rows[0] };
   });
+  const extras = await Promise.all(data.workspaces.map(async (w) => ({ features: await flagsFor(w.id), plan: effectivePlan(await loadSubscription(pool, w.id)) })));
   res.json({
     user,
-    workspaces: data.workspaces.map((w) => ({ id: w.id, name: w.name, role: w.role, retentionDays: w.data_retention_days, businessCount: w.business_count })),
+    workspaces: data.workspaces.map((w, i) => ({ id: w.id, name: w.name, role: w.role, retentionDays: w.data_retention_days, businessCount: w.business_count, ...extras[i] })),
     preferences: {
       lastWorkspaceId: data.prefs?.last_workspace_id ?? null,
       recentBusinessIds: data.prefs?.recent_business_ids ?? [],

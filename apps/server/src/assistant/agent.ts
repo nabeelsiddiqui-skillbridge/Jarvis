@@ -4,6 +4,7 @@ import { DATE_PRESETS, todayIn, type AssistantStep, type AssistantStreamEvent, t
 import { config } from "../config.js";
 import { inBusinessAs } from "../auth/access.js";
 import { runTool, toolParams, type ToolEnv } from "./tools.js";
+import { recordUsage } from "../lib/usage.js";
 
 type Msg = Anthropic.Beta.BetaMessageParam;
 type Block = Anthropic.Beta.BetaContentBlock;
@@ -223,13 +224,18 @@ async function turn(t: TurnInput) {
   // Only complete, well-formed turns are replayed later; failed/refused/cut-off tool turns are not.
   const keep = status === "complete" || (status === "truncated" && turnMessages.at(-1)?.role === "assistant");
   const reply: DisplayMessage = { id: randomUUID(), role: "assistant", status, text: textParts.join("").trim(), steps, evidence, proposals, actions, createdAt: new Date().toISOString() };
-  await inBusinessAs(t.userId, t.businessId, "assistant.use", async ({ db, business }) => {
+  const workspaceId = await inBusinessAs(t.userId, t.businessId, "assistant.use", async ({ db, business }) => {
     await db.query(
       `INSERT INTO conversation_messages (id, conversation_id, business_id, seq, role, status, display, api_messages, model, usage) VALUES ($1, $2, $3, $4, 'assistant', $5, $6, $7, $8, $9)`,
       [reply.id, t.conversationId, business.id, loaded.seq + 1, status, JSON.stringify(reply), JSON.stringify(keep ? turnMessages : []), servedBy, JSON.stringify(usage)],
     );
     await db.query(`UPDATE conversations SET updated_at = now() WHERE id = $1`, [t.conversationId]);
+    return business.workspace_id;
   });
+  // Metered once per question that reached the model (plan quota + platform usage reporting).
+  if (usage.requests > 0) {
+    await recordUsage({ workspaceId, businessId: t.businessId, userId: t.userId, kind: "ai_message", meta: { model: servedBy, voice: t.voice, ...usage } });
+  }
   t.emit({ type: "done", message: reply });
 }
 

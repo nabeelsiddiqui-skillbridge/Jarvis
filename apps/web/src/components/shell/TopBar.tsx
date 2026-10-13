@@ -49,7 +49,7 @@ export function TopBar({ business, title, workspaceId, onMenu, assistantOpen, on
               {INDUSTRIES.find((i) => i.id === business.industry)?.label ?? business.industry} · {business.timezone.replace(/_/g, " ")} · {business.currency}
             </div>
           </div>
-          <Badge tone="violet" className="ml-1 hidden md:inline-flex">{ROLE_LABELS[business.role]}</Badge>
+          {business.support ? <Badge tone="warning" className="ml-1 hidden md:inline-flex">Support · read-only</Badge> : <Badge tone="violet" className="ml-1 hidden md:inline-flex">{ROLE_LABELS[business.role]}</Badge>}
         </div>
       ) : (
         <div className="min-w-0 flex-1 truncate font-display text-[17px] font-semibold">{title}</div>

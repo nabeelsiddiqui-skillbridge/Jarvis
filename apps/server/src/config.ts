@@ -53,6 +53,10 @@ export function configStatus(): SecretStatus[] {
     ["HUBSPOT_CLIENT_SECRET", "HubSpot app client secret", "HubSpot connector + webhook verification"],
     ["STRIPE_SECRET_KEY", "Stripe secret key", "Billing"],
     ["STRIPE_WEBHOOK_SECRET", "Stripe webhook signing secret", "Billing webhooks"],
+    ["STRIPE_PRICE_STARTER", "Stripe price for Starter", "Selling the Starter plan"],
+    ["STRIPE_PRICE_GROWTH", "Stripe price for Growth", "Selling the Growth plan"],
+    ["STRIPE_PRICE_AGENCY", "Stripe price for Agency", "Selling the Agency plan"],
+    ["PLATFORM_ADMIN_EMAILS", "Platform administrator emails", "Access to the platform admin console"],
     ["SMTP_URL", "SMTP server", "Email delivery of briefings, reports and invitations"],
   ];
   return items.map(([key, label, requiredFor]) => ({ key, label, requiredFor, configured: Boolean(env(key)) }));

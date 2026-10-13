@@ -37,3 +37,14 @@ export async function notifyUsers(db: pg.PoolClient, p: { workspaceId: string; b
   if (n) await db.query("SELECT app.notify_business($1, 'notification', '{}')", [p.businessId]);
   return { notified: n, users };
 }
+
+/** Workspace-level notice to every workspace owner (billing, support access). */
+export async function notifyWorkspaceOwners(db: pg.PoolClient, p: { workspaceId: string; kind: string; title: string; body?: string; link?: string; dedupeKey?: string }) {
+  const { rows } = await db.query(
+    `INSERT INTO notifications (user_id, workspace_id, business_id, kind, title, body, link, dedupe_key)
+     SELECT wm.user_id, $1, NULL, $2, $3, $4, $5, $6 FROM workspace_memberships wm WHERE wm.workspace_id = $1 AND wm.role = 'owner'
+     ON CONFLICT (user_id, dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING RETURNING user_id`,
+    [p.workspaceId, p.kind, p.title, p.body ?? "", p.link ?? null, p.dedupeKey ?? null],
+  );
+  return rows.length;
+}

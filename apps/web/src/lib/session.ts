@@ -1,9 +1,19 @@
 import { useQuery } from "@tanstack/react-query";
+import type { PlanId } from "@bca/shared";
 import { get } from "./api";
 
 export interface Me {
   user: { id: string; email: string; name: string; isPlatformAdmin: boolean };
-  workspaces: { id: string; name: string; role: "owner" | "member"; retentionDays: number; businessCount: number }[];
+  workspaces: {
+    id: string;
+    name: string;
+    role: "owner" | "member";
+    retentionDays: number;
+    businessCount: number;
+    plan: PlanId;
+    /** Platform feature flags for this workspace (enforced on the server; used here to explain unavailable controls). */
+    features: { assistant: boolean; voice: boolean; external_actions: boolean };
+  }[];
   preferences: {
     lastWorkspaceId: string | null;
     recentBusinessIds: string[];
@@ -21,4 +31,10 @@ export function useMe() {
     retry: false,
     staleTime: 60_000,
   });
+}
+
+/** Feature flags for a workspace; defaults to on when unknown (e.g. read-only support access). The server enforces them either way. */
+export function useFeatures(workspaceId: string | undefined) {
+  const me = useMe();
+  return me.data?.workspaces.find((w) => w.id === workspaceId)?.features ?? { assistant: true, voice: true, external_actions: true };
 }

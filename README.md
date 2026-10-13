@@ -1,107 +1,99 @@
-# J.A.R.V.I.S. — AI Command Center
+# Business Command AI
 
-A system that manages all your accounts and gives you live updates, plus live, functional dashboards you can edit.
+An AI business command center. Customers connect their business accounts, organize them into separate businesses, ask questions by voice or text, and build live, editable dashboards — for one business or a whole client portfolio.
 
-Talk to JARVIS (voice) or type to it:
+- **Workspaces and businesses** with per-business roles (workspace owner, business administrator, analyst, viewer), enforced on the server and by PostgreSQL row-level security.
+- **Live connectors**: Shopify, Google Analytics 4, Google Search Console, Google Ads and HubSpot (OAuth, minimum scopes, asset selection, initial import, incremental sync, webhooks, reconciliation). Further connectors are listed as *planned* and never presented as working.
+- **Normalized metrics** with definitions, freshness and limitations; store sales, analytics revenue, ad-attributed value and CRM value are kept separate.
+- **Editable dashboards** (drag, resize, edit, version history, sharing) and **AI dashboard generation** that only uses metrics the business actually has.
+- **Assistant** (text and streaming voice) that answers through tools against the business's own data and cites evidence for every figure.
+- **Briefings, insights and automations**: deterministic detection (period changes, anomalies, goal pacing, data health), AI explanations labelled as possibilities, scheduled briefings and reports, alerts and tasks.
+- **Approved external actions** (pause/enable Google Ads campaigns, change budgets, move HubSpot deals): live current values, approval bound to the exact change, re-validation before execution, single execution, full attempt history.
+- **Billing** (Stripe Checkout and customer portal, 14-day trial, plan limits enforced on the server) and a **platform admin console** (customers, subscriptions, connector health, sync failures, jobs, AI and voice usage, feature flags, configuration status, audit history, and time-limited, audited support access).
+- **Labelled demo mode** with separate seeded data — demo figures are never mixed into real businesses.
 
-- **“What did I miss?”** It checks every connected account and briefs you, out loud if you want.
-- **“Any new emails or meetings today?”** It reads your Gmail and Calendar.
-- **“Build me a dashboard for Stripe and GitHub.”** It creates a new dashboard and deploys live widgets.
-- **“Make the revenue chart a line chart and refresh it every 30 seconds.”** It edits the widgets.
+`docs/STAGES.md` records, stage by stage, what works, how it was verified, what is simulated and what external setup remains.
 
-The interface is a dark, HUD-style “tech / AI” theme with an animated arc-reactor core. The core shows when JARVIS is listening, thinking or speaking.
+## Requirements
 
-## Features
-
-| | |
-|---|---|
-| 🎙️ **Voice + chat** | Push-to-talk speech recognition and spoken replies (Web Speech API, works best in Chrome or Edge). You can also just type. |
-| 🧠 **Claude-powered agent** | JARVIS runs on Claude with tools: `get_updates`, `add_widget`, `update_widget`, `remove_widget`, `create_dashboard` and `rename_dashboard`. With no API key it falls back to a keyword-based offline brain, so you can still try the UI. |
-| 📊 **Live, editable dashboards** | Several dashboards, each with its own tab. Widgets refresh themselves. You can drag, resize, rename, switch between stat/line/area/bar/list views, and change the refresh rate. Dashboards are saved to your account. |
-| 👤 **User accounts** | Sign up and sign in with email and password. Each person's connected accounts and dashboards are private to them, and dashboards follow you to any device. Account settings let you change your password (which signs out other devices) or delete your account. |
-| 🔐 **You connect your own accounts from the frontend** | The Accounts panel is where you link each service with your own token or Google sign-in. Credentials are encrypted in the database (AES-256-GCM) and are never sent back to the browser. Every integration is read-only. You can try any connector with **demo data** first. |
-
-### Connectors
-
-| Connector | How you connect | Live metrics |
-|---|---|---|
-| Google (Gmail + Calendar) | Sign in with Google (OAuth, read-only scopes) | unread count, unread inbox, agenda, events today |
-| GitHub | Personal access token | open PRs, notifications, stars per repo, activity |
-| Slack | Bot token | recent messages, channels |
-| Stripe | Restricted API key | balance, recent payments, 7-day revenue |
-| Weather | City name (Open-Meteo, no key) | current temp, next 24h, 7-day |
-| Crypto Markets | Watchlist (CoinGecko, no key) | price, 24h change, 7-day chart |
-| Hacker News | Nothing to configure | top stories, scores |
-
-To add a connector, create a file in `server/src/connectors/` that implements the `Connector` interface (`types.ts`), then register it in `connectors/index.ts`. The UI and JARVIS pick it up automatically.
+- Node.js 22.13+ and npm
+- PostgreSQL 16+ (Supabase Postgres works; use its direct connection string)
 
 ## Quick start
 
 ```bash
 npm install
-cp .env.example .env      # add ANTHROPIC_API_KEY (optional, but that's the real brain)
-npm run dev               # server on :8787, web app on http://localhost:5173
+cp .env.example .env       # set DATABASE_URL; everything else is optional to start
+npm run db:migrate
+npm run dev                # API :8787, worker, web app on http://localhost:5173
 ```
 
-Open http://localhost:5173, create an account, click **Accounts**, connect something (or choose **Demo data**), then talk to JARVIS.
+Sign up, create a workspace and a business, then connect a source — or open the labelled demo business to explore first. Any connector whose provider credentials are missing shows exactly which settings an administrator must add; nothing pretends to be connected.
 
-Production build (one server serves both the API and the web app):
+Add your email to `PLATFORM_ADMIN_EMAILS` to see the platform admin console.
+
+## Production
 
 ```bash
 npm run build
-npm start                 # http://localhost:8787
+npm start                  # API + built web app on :8787
+npm run start:worker       # durable job worker: syncs, webhooks, detection, automations, actions, retention
 ```
 
-### Environment
+Run at least one worker; the API and worker can scale independently (jobs are claimed with `FOR UPDATE SKIP LOCKED` and de-duplicated). In production the API refuses to start without `DATABASE_URL`, `ENCRYPTION_KEY`, `APP_URL` and `API_URL`. Migrations run automatically on API start (`AUTO_MIGRATE=false` to disable).
 
-| Variable | Purpose |
+## Configuration
+
+All settings are documented in [`.env.example`](.env.example). Secrets are read only on the server; the admin console reports whether each is set without showing values.
+
+| Area | Settings |
 |---|---|
-| `ANTHROPIC_API_KEY` | Turns on the Claude brain. Without it JARVIS runs in offline mode. |
-| `JARVIS_MODEL` | Default `claude-opus-5-5` |
-| `JARVIS_EFFORT` | `low` (default, keeps voice replies quick), `medium` or `high` |
-| `JARVIS_SECRET` | Key that encrypts stored credentials. **Required in production**: generate one with `openssl rand -base64 32` and keep it safe. In development a key is generated in `server/data/secret.key`. |
-| `JARVIS_DATA_DIR` | Where the SQLite database is stored. Default `server/data` |
-| `JARVIS_ALLOW_SIGNUP` | Set to `false` to close sign-ups (for a private install) |
-| `TRUST_PROXY` | Set when running behind a reverse proxy, so login rate limiting sees real client IPs |
-| `APP_URL` | Where the web app is served. Used for OAuth redirects. Default `http://localhost:5173` |
-| `SERVER_URL` | Public URL of the API server, used to build the Google redirect URI. Default `http://localhost:8787` |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Turn on “Sign in with Google”. Add `<SERVER_URL>/api/oauth/google/callback` as an authorized redirect URI. |
+| Core | `DATABASE_URL`, `ENCRYPTION_KEY`, `APP_URL`, `API_URL`, `TRUST_PROXY`, `ALLOW_SIGNUP`, `PLATFORM_ADMIN_EMAILS` |
+| AI assistant | `ANTHROPIC_API_KEY`, `ASSISTANT_MODEL`, `ASSISTANT_EFFORT`, `ASSISTANT_DAILY_MESSAGES` |
+| Voice | `DEEPGRAM_API_KEY` (optional; browser speech is the fallback), `VOICE_*` |
+| Shopify | `SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET` |
+| Google (GA4, Search Console, Ads) | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_ADS_DEVELOPER_TOKEN` |
+| HubSpot | `HUBSPOT_CLIENT_ID`, `HUBSPOT_CLIENT_SECRET`, `HUBSPOT_ENABLE_ACTIONS` |
+| Billing | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_STARTER`, `STRIPE_PRICE_GROWTH`, `STRIPE_PRICE_AGENCY` |
+| Email | `SMTP_URL`, `EMAIL_FROM` |
 
-## Architecture
+OAuth redirect URIs and webhook URLs to register with each provider are listed in the admin console under **Configuration** (they are built from `API_URL`).
+
+## Repository layout
 
 ```
-client/  React + Vite + TypeScript
-  App.tsx                 shell, top bar, dashboard tabs
-  components/ChatPanel    chat log, mic, voice output, arc-reactor Orb
-  components/Dashboard    react-grid-layout grid (drag / resize)
-  components/WidgetCard   polls /api/data on its own interval; recharts visuals
-  components/AccountsPanel connect / disconnect / demo for each connector
-  lib/dashboards.ts       dashboard state (saved to your account) + applies JARVIS's edit ops
-  components/AuthScreen   sign in / sign up
-  components/SettingsModal change password, delete account
-  lib/voice.ts            speech recognition + synthesis hooks
-
-server/  Express + TypeScript
-  index.ts                REST API, auth, Google OAuth, static hosting
-  agent.ts                Claude tool-use loop (+ offline fallback)
-  db.ts                   SQLite schema (node:sqlite) + AES-256-GCM credential encryption
-  store.ts                users, sessions, connected accounts, dashboards
-  connectors/*            one file per service, plus demo data
+packages/shared   Types, zod schemas, permissions, metric catalog, plans — used by API and web
+apps/server       Express API and worker
+  src/auth          sessions, access helpers (inBusiness / inWorkspace), platform admins
+  src/connectors    provider adapters (Shopify, Google, HubSpot), sync framework, actions
+  src/metrics       metric engine, evidence
+  src/assistant     Claude tool loop and tools
+  src/insights      deterministic detection, AI explanations
+  src/automations   schedules and runs
+  src/actions       proposal / approval / execution engine
+  src/billing       plans, entitlements, Stripe client and webhook verification
+  src/routes        HTTP API (incl. admin)
+  src/jobs          Postgres-backed job queue, handlers, scheduler
+apps/web          React 19 + Vite + Tailwind app and marketing site
+db/migrations     SQL migrations (schema, RLS policies, grants)
+docs/STAGES.md    Stage reports
 ```
 
-How a chat turn works: the browser sends the conversation and the current dashboard to `POST /api/chat`. The server runs Claude with the tools above against *your* session's accounts. Data tools fetch live updates; dashboard tools return **ops**, and the browser applies them, so new widgets appear right away.
+Frontend presentation, provider adapters, metric queries, AI orchestration and external action execution are separate modules.
 
-## Security
+## Security model (summary)
 
-- **Passwords** are hashed with scrypt and a per-user salt.
-- **Sessions** use a random 256-bit token in an `HttpOnly`, `SameSite=Lax` cookie (`Secure` over HTTPS). The database stores only a SHA-256 of each token.
-- **Connected-account credentials** are encrypted with AES-256-GCM using `JARVIS_SECRET`. The browser never receives them.
-- **Isolation:** every API call is scoped to the signed-in user, so nobody can read another person's accounts, data or dashboards.
-- **Abuse protection:** sign-in, sign-up and password changes are rate-limited per IP. Any request that changes data must carry an `X-Jarvis` header, which other websites can't send (CSRF protection).
-- **Google OAuth:** each sign-in uses a one-time, 10-minute `state` value that is tied to the user who started it.
+- Every user request runs in a transaction as the restricted `bca_app` role with row-level security; the business ID in a URL is only a lookup key.
+- Provider tokens are encrypted at rest (AES-256-GCM) and never reach the browser; OAuth state and webhook signatures (Shopify, HubSpot, Stripe) are verified.
+- External actions need an administrator's approval bound to the payload's hash, are re-validated before execution, and run once (idempotency key, row lock, status check after ambiguous failures).
+- Platform staff see operational metadata only. Customer data requires a reasoned, time-limited, read-only support grant; owners are notified, can end it, and every request is recorded in their audit log.
+- Configurable data retention purges imported records, conversations and job history; aggregated metrics for purged days are kept and frozen.
 
-## Before going to production
+## Tests
 
-- Serve it over HTTPS and set `APP_URL` to the `https://` address. Set `JARVIS_SECRET` and back it up: without it, the stored keys can't be decrypted.
-- SQLite is fine for one server. For several servers, move `store.ts` to Postgres.
-- There's no password-reset email yet. Add one (and optionally email verification) before opening this to the public.
+```bash
+npm test                   # needs a local PostgreSQL; TEST_DATABASE_URL defaults to postgres://postgres@localhost:5432/bca_test
+npm run typecheck
+```
+
+The server suite runs against real PostgreSQL (with RLS) and local stand-ins for Shopify, Google, HubSpot, Stripe, Anthropic and Deepgram, covering imports that reconcile with the source, retries and duplicate events, isolation between businesses, the assistant's evidence, approvals and single execution, billing webhooks, plan limits, feature flags and support access.

@@ -6,6 +6,7 @@ import { requireUser } from "../auth/sessions.js";
 import { inBusiness, inWorkspace, isUuid, toBusiness } from "../auth/access.js";
 import { audit } from "../lib/audit.js";
 import { badRequest, notFound } from "../lib/errors.js";
+import { assertWithinLimit } from "../billing/entitlements.js";
 
 export const businessesRouter = Router();
 businessesRouter.use(requireUser);
@@ -31,6 +32,7 @@ businessesRouter.post("/workspaces/:workspaceId/businesses", async (req, res) =>
   const body = businessInput.parse(req.body);
   const id = randomUUID();
   await inWorkspace(req, req.params.workspaceId, "business.create", async ({ db, workspaceId, userId }) => {
+    await assertWithinLimit(workspaceId, "businesses");
     await db.query(
       `INSERT INTO businesses (id, workspace_id, name, logo_url, industry, website, timezone, currency, description, created_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
@@ -44,7 +46,7 @@ businessesRouter.post("/workspaces/:workspaceId/businesses", async (req, res) =>
 // ------------------------------------------------------------------ single business
 
 businessesRouter.get("/businesses/:businessId", async (req, res) => {
-  const out = await inBusiness(req, req.params.businessId, "business.read", async ({ business, role }) => toBusiness({ ...business, role }));
+  const out = await inBusiness(req, req.params.businessId, "business.read", async ({ business, role, support }) => ({ ...toBusiness({ ...business, role }), support }));
   res.json(out);
 });
 

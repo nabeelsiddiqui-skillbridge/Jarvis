@@ -23,10 +23,14 @@ export async function explainInsight(db: pg.PoolClient, insightId: string) {
       system: `${NARRATIVE_RULES}\n\nTask: in at most 90 words, give two or three possible explanations for this finding and what to check to confirm each. Start with "Possible explanations:". Cite evidence ids (I1, I2…) when you refer to a figure. If the data can't support an explanation, say what additional data would help.`,
       user: JSON.stringify(payload),
       maxTokens: 2000,
+      usage: { workspaceId: ins.workspace_id, businessId: ins.business_id, feature: "insight_explanation" },
     });
     await db.query(`UPDATE insights SET explanation = $2, explanation_status = 'ready', explanation_model = $3 WHERE id = $1`, [insightId, text, model]);
   } catch (e) {
-    if (e instanceof AiUnavailable) return;
+    if (e instanceof AiUnavailable) {
+      await db.query(`UPDATE insights SET explanation_status = 'unavailable' WHERE id = $1`, [insightId]);
+      return;
+    }
     await db.query(`UPDATE insights SET explanation_status = 'failed' WHERE id = $1`, [insightId]);
     throw e;
   }

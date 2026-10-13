@@ -9,7 +9,7 @@ export const assistantKeys = {
   proposal: (b: string, p: string) => ["b", b, "assistant", "proposal", p] as const,
 };
 
-export interface AssistantStatus { configured: boolean; reason: string | null; dailyLimit: number }
+export interface AssistantStatus { configured: boolean; reason: string | null; voice: boolean; voiceReason: string | null; dailyLimit: number }
 export interface ConversationDetail { id: string; title: string; updatedAt: string; messages: DisplayMessage[] }
 export interface ProposalDetail extends ProposalSummary { spec: DashboardSpec; baseVersion: number | null }
 

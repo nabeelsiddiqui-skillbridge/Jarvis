@@ -281,4 +281,23 @@ describe("external actions (against local Google Ads and HubSpot stand-ins)", ()
     const venv = { userId: viewer.userId, businessId, conversationId: conv, nextEvidenceId: () => "E2" };
     expect(((await runTool(venv, "propose_action", { action_type: "google_ads.campaign.set_status", connection_id: adsId, target_id: "2222222222:101", params: { status: "PAUSED" } })) as any).isError).toBe(true);
   });
+
+  it("a platform flag switches actions off — including ones approved but not yet executed", async () => {
+    const pending = (await owner.get(api("?status=pending"))).body[0];
+    expect(pending).toBeTruthy();
+    expect((await owner.post(api(`/${pending.id}/approve`), { payloadHash: pending.payloadHash })).status).toBe(200);
+    await pool.query(`UPDATE feature_flags SET overrides = jsonb_build_object($1::text, false) WHERE key = 'external_actions'`, [ws]);
+    const before = google.state.calls.mutates;
+    await dueNow();
+    await runAll();
+    const after = (await owner.get(api(`/${pending.id}`))).body;
+    expect(after.status).toBe("failed");
+    expect(after.error).toMatch(/turned off .* Nothing was changed/);
+    expect(google.state.calls.mutates).toBe(before);
+    const types = (await owner.get(api("/types"))).body;
+    expect(types.every((t: any) => !t.available && /turned off/.test(t.unavailableReason))).toBe(true);
+    const r = await owner.post(api(), { connectionId: adsId, type: "google_ads.campaign.set_status", targetId: "2222222222:102", params: { status: "PAUSED" } });
+    expect(r.status).toBe(412);
+    await pool.query(`UPDATE feature_flags SET overrides = '{}' WHERE key = 'external_actions'`);
+  });
 });

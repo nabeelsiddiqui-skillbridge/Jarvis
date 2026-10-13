@@ -10,6 +10,7 @@ import { getDashboard } from "../dashboards/store.js";
 import { loadAvailability, loadCalcs, runQuery } from "../metrics/engine.js";
 import { toMetricEvidence } from "../metrics/evidence.js";
 import { NARRATIVE_RULES, aiConfigured, aiText } from "../ai/complete.js";
+import { assertEnabled } from "../lib/flags.js";
 
 /**
  * AI commentary widget: a short summary of what the dashboard's own widgets
@@ -51,8 +52,9 @@ commentaryRouter.post(
       const cached = (await db.query(`SELECT id, text, evidence, created_at FROM dashboard_commentary WHERE dashboard_id = $1 AND cache_key = $2`, [d.id, cacheKey])).rows[0];
       if (cached) return { commentary: { id: cached.id, text: cached.text, evidence: cached.evidence, createdAt: cached.created_at, cacheKey }, cached: true };
       if (!aiConfigured()) throw prerequisite("AI commentary needs ANTHROPIC_API_KEY on the platform.");
+      await assertEnabled("assistant", business.workspace_id);
       const payload = { business: { name: business.name, demo: business.is_demo }, dashboard: d.name, widgets: evidence.map((e) => ({ id: e.id, widget: e.question, metric: e.metric.label, unit: e.metric.unit, currency: e.currency, period: e.range, comparison: e.comparisonRange, availability: e.availability, total: e.total, comparison_total: e.comparisonTotal, change_pct: e.change == null ? null : Math.round(e.change * 10) / 10, breakdown: e.rows?.slice(0, 5), limitations: e.limitations })) };
-      const ai = await aiText({ system: `${NARRATIVE_RULES}\n\nTask: in at most 110 words, summarize what this dashboard shows for the period: the most important movements first, then anything that needs attention. Cite widget evidence ids (C1, C2…).`, user: JSON.stringify(payload), maxTokens: 2500 });
+      const ai = await aiText({ system: `${NARRATIVE_RULES}\n\nTask: in at most 110 words, summarize what this dashboard shows for the period: the most important movements first, then anything that needs attention. Cite widget evidence ids (C1, C2…).`, user: JSON.stringify(payload), maxTokens: 2500, usage: { workspaceId: business.workspace_id, businessId: business.id, feature: "dashboard_commentary" } });
       const id = randomUUID();
       await db.query(`INSERT INTO dashboard_commentary (id, dashboard_id, business_id, cache_key, text, evidence, model, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (dashboard_id, cache_key) DO NOTHING`,
         [id, d.id, business.id, cacheKey, ai.text, JSON.stringify(evidence), ai.model, userId]);

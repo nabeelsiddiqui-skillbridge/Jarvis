@@ -192,10 +192,13 @@ async function computeDay(ctx: SyncContext, date: string, fullHistory: boolean):
     const ids = [...new Set(orders.map((o) => o.customerId).filter(Boolean))] as string[];
     if (ids.length) {
       const first = await ctx.db.query(
-        `SELECT payload->>'customerId' AS cid, min(occurred_at) AS first_at FROM source_records
-          WHERE asset_id = $1 AND record_type = 'order' AND payload->>'customerId' = ANY($2::text[])
-            AND NOT (payload->>'test')::boolean AND NOT (payload->>'cancelled')::boolean
-          GROUP BY 1`,
+        `SELECT cid, min(first_at) AS first_at FROM (
+           SELECT payload->>'customerId' AS cid, occurred_at AS first_at FROM source_records
+            WHERE asset_id = $1 AND record_type = 'order' AND payload->>'customerId' = ANY($2::text[])
+              AND NOT (payload->>'test')::boolean AND NOT (payload->>'cancelled')::boolean
+           UNION ALL -- first orders whose records were removed by the retention policy
+           SELECT customer_id, first_at FROM customer_first_orders WHERE asset_id = $1 AND customer_id = ANY($2::text[])
+          ) f GROUP BY 1`,
         [ctx.asset.id, ids],
       );
       const firstAt = new Map(first.rows.map((r) => [r.cid, new Date(r.first_at).toISOString()]));

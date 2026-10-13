@@ -16,7 +16,7 @@ Status of each stage of the build plan: what works, what is simulated, and what 
 - Onboarding: account → workspace → first business → goals.
 
 **Simulated / not yet built**
-- Nothing is simulated. Pages for later stages show a clear "delivered in stage N" notice instead of fake content.
+- Nothing is simulated. (Until each later stage shipped, its pages showed a clear "delivered in stage N" notice instead of fake content; none remain.)
 - Invitation emails: links are shown to the owner to copy until an email provider is configured (Stage 7).
 
 **Verified**
@@ -415,3 +415,135 @@ Status of each stage of the build plan: what works, what is simulated, and what 
 - Google Ads: the existing `adwords` scope already allows changes, but the developer token needs Basic or Standard access to modify non-test accounts.
 - HubSpot: add `crm.objects.deals.write` to the app's optional scopes, set `HUBSPOT_ENABLE_ACTIONS=true`, and have users reconnect.
 - The worker process must be running for approved actions to execute.
+
+## Stage 9 — Billing, platform administration, marketing site and final verification ✅
+
+**Works**
+- **Plans and limits** (`packages/shared/src/billing.ts`): Free, Starter ($49), Growth ($149) and Agency ($399). Each plan limits:
+  - real businesses and connected accounts (demo businesses and demo connections don't count);
+  - members plus pending invitations;
+  - assistant questions per month (UTC calendar month);
+  - voice conversations per month.
+- **Trial and fallback**:
+  - New workspaces start a **14-day Growth trial** with no card.
+  - When it ends, or a subscription ends, the Free limits apply. Data is never deleted; only adding beyond the limits is blocked.
+- **Limits enforced on the server** before:
+  - creating a business, starting a new connection, or inviting someone;
+  - every assistant question and every voice session.
+  Each refusal is a 402 with a plain message ("The Free plan includes 1 business. Upgrade in Billing…").
+- **Usage metering** (`usage_events`):
+  - every answered assistant question, with model and token counts;
+  - every background AI call (insight explanations, report summaries, dashboard commentary), with its feature and tokens;
+  - voice sessions and TTS characters.
+- **Stripe billing** (`apps/server/src/billing/`), using form-encoded REST from the server only:
+  - **Checkout**: one Stripe customer per workspace (idempotency key), the server-side price for the plan, and a workspace reference on both the session and the subscription.
+  - **Customer portal**: change plans, update the payment method, cancel.
+  - Owners only; other members see the plan and usage read-only.
+- **Stripe webhooks** (`/api/webhooks/stripe`):
+  - signature verified on the raw body with a 5-minute tolerance;
+  - each event id applied once, recorded and applied in one transaction, so a failure returns 500 and Stripe's retry is processed;
+  - older events never overwrite newer state, and a stale subscription can't replace a live one.
+  - Handled events: checkout completed (reads the subscription), subscription created/updated/deleted, and payment failed (workspace owners are notified).
+- **Billing page**:
+  - current plan, status, trial end or renewal date, cancellation notice, and usage meters against limits;
+  - plan cards with Choose / Switch in portal / Manage billing.
+  - When Stripe isn't configured, it says so instead of showing dead buttons.
+- **Platform admin console** (`/app/w/:id/admin`), for platform administrators only (`PLATFORM_ADMIN_EMAILS`, applied at sign-up and on every API start):
+  - **Overview**: users, workspaces, businesses and connections (with failing counts), jobs due and failed, subscriptions by plan and status, list-price MRR, and AI/voice usage over 30 days.
+  - **Customers**:
+    - search by workspace, owner or member;
+    - a customer page with members, businesses, connections and errors, subscription and billing events, usage against limits, support history, and the audit log.
+    - Actions, all audited with a reason: grant a plan or trial without Stripe (refused while a Stripe subscription is live); disable or enable an account (signs it out everywhere).
+  - **Connector health**: configuration, accounts, failing and reconnect counts, syncs and webhooks in the last 24h per provider, and a sync-failure list.
+  - **Jobs**: counts by type and status; recent jobs with errors; retry a failed job (refused when the same work is already queued).
+  - **AI & voice usage**: by day, by workspace and by AI feature, with token counts.
+  - **Feature flags** `assistant`, `voice` and `external_actions`:
+    - global value plus per-workspace overrides; switching one off for everyone asks for confirmation;
+    - enforced on the server (assistant questions, background AI, voice sessions and speech, action listing, proposing, approval, *and execution of already-approved actions*);
+    - the UI explains why a control is unavailable.
+  - **Configuration**: whether each secret and setting is present (values never shown), plus the OAuth redirect and webhook URLs to register with each provider and Stripe.
+  - **Audit**: across customers, filterable by workspace, actor type and action prefix.
+- **Support access**:
+  - A platform administrator opens it per workspace with a reason (≥10 characters) for 15 minutes to 4 hours.
+  - It gives **read-only** viewer access, built into the database role function so row-level security applies.
+  - The assistant, exports and all writes are refused ("Support access is read-only.").
+  - Every request is written to the **customer's own audit log** (`support.data_viewed`); refused attempts are kept too (`support.access_denied`).
+  - Workspace owners get a notification with the reason, see each grant with its page-view count in Workspace settings, and can end it at once.
+  - Grants stop working at expiry or as soon as the user loses platform-admin status.
+  - The admin sees a "Support access · read-only" banner and badge. The business stays out of their recents, and the assistant panel is hidden.
+- **Data retention**: the daily `retention.purge` job enforces the setting that Workspace settings already offered.
+  - **Deleted**: imported source records, conversations, finished jobs, webhook receipts and read notifications older than the window.
+  - **Kept**: aggregated metrics, dashboards, reports, billing usage and audit logs.
+  - A record is purged only when **both** its event time and its last change at the source are older than the window. A HubSpot contact that qualified recently stays, as do open deals, which feed the live pipeline.
+  - Purged days are **frozen**: they keep their stored metrics and are never recomputed. Each Shopify customer's first order is kept, so "new customers" stays correct.
+  - Each purge is audited with counts.
+- **Onboarding** now has all ten steps, adding:
+  - **first dashboard**: from a template, only when connected data can fill it; otherwise it says why to skip;
+  - **first assistant question**: suggested questions open the assistant pre-filled.
+  The Command Center has a **Getting started** card (connect, first import, dashboard, question, goals, briefing) that tracks real progress and can be dismissed.
+- **Marketing site**:
+  - home: product, how it works, evidence example clearly marked illustrative, live vs *planned* integrations;
+  - **Pricing** from the same plan definitions the server enforces, with FAQ;
+  - **Security** page, every claim matching the implementation;
+  - header and footer navigation.
+- **Workspace-level notifications** for billing and support access, with no business attached.
+- **Dependency review**:
+  - `nodemailer` moved to 10.0.10, which clears all of its advisories, including SMTP command injection (production dependency);
+  - `ws` (test-only) to 8.22; vitest to 4.1.11 (dev-only; clears the tinypool and mocker advisories).
+  - Remaining: one *low* esbuild advisory, which only affects the dev server on Windows and is dev tooling (tsup/vite).
+  - npm 10.9.4 crashed resolving vitest 4's peer set (`edgesOut`), so the lockfile was regenerated with npm 11.19.1. Versions were picked at least two weeks old where a fix allowed it.
+
+**Verified**
+- `apps/server/test/billing-admin.test.ts` (13 tests), against a Stripe stand-in:
+  - trial defaults and member/owner rights; Free fallback and every server-side limit; demo businesses not counted; monthly quotas and their reset;
+  - voice metering; checkout prerequisite message; a single customer with an idempotency key; server-side price and workspace reference;
+  - webhooks: bad signature and replay outside the tolerance → 400, exactly-once application, out-of-order events ignored, upgrade and cancellation notice, payment-failed notification, deletion → Free with data kept;
+  - admin-only endpoints; overview, customers, usage, connectors and jobs (with retry and duplicate guard);
+  - configuration with **no secret values in the response**;
+  - flags per workspace (voice and assistant refused, other workspaces unaffected, audited); plan grant; account disabling;
+  - support access: reason and duration validation, read-only, write and assistant refused, views and refusals audited, owner notified, owner revokes, expiry, demoted admin;
+  - retention: what is purged and kept, frozen days, first-order memory, audit, idempotence.
+- `actions.test.ts`: the `external_actions` flag blocks listing, proposing, and an action that was approved but not yet executed (no provider write).
+- Full suite: **101 server + 12 shared tests pass**.
+- Browser walkthrough (Chromium, desktop and 390px):
+  - marketing home, pricing and security;
+  - sign-up through the new dashboard and question steps; Getting started on the Command Center;
+  - Billing on trial → Choose Starter → redirected to Checkout (stand-in) → signed webhook → Billing shows Starter, active, with renewal date. A tampered signature returned 400.
+  - Admin console: every tab; customer search and detail; support access opened with a reason; the customer's business opened read-only with the banner; audit shows the staff views.
+  - The customer's Workspace settings show the grant with its view count → End access → the admin gets "not found".
+  - No horizontal overflow on mobile admin.
+  - Fixed along the way: the Getting started card showed during support views; the admin detail ran queries in parallel on one connection; refused support attempts were lost with their rolled-back transaction; flag reads used the restricted role.
+- **Secrets**: the built browser bundle and all API and worker logs from the walkthroughs were searched for every configured secret value and for key patterns (`sk_…`, `whsec_…`, `sk-ant-…`, `AIza…`). Nothing was found.
+
+**Simulated / not verified live**
+- Stripe ran against a local stand-in that follows Stripe's documented REST and webhook shapes. Checkout itself (Stripe's hosted page) and the customer portal were not exercised. The subscription period end is read from the subscription or its items, so both API-version shapes work.
+- Marketing prices are display values; what's charged is the Stripe Price configured per plan, so keep them in sync.
+
+**External setup**
+- Stripe:
+  1. Set `STRIPE_SECRET_KEY`.
+  2. Create a recurring monthly Price per plan (`STRIPE_PRICE_STARTER`, `STRIPE_PRICE_GROWTH`, `STRIPE_PRICE_AGENCY`).
+  3. Add a webhook endpoint `<API_URL>/api/webhooks/stripe` for `checkout.session.completed`, `customer.subscription.created`/`updated`/`deleted` and `invoice.payment_failed`, and set `STRIPE_WEBHOOK_SECRET`.
+  4. Enable the customer portal.
+- `PLATFORM_ADMIN_EMAILS` for platform staff.
+
+## Final acceptance check
+
+| Acceptance criterion | Evidence |
+|---|---|
+| Users can create and switch businesses | `access.test.ts`; Stage 1 and 9 walkthroughs (business-keyed queries, remounted pages, nothing carries over) |
+| Business data cannot leak across users or businesses | Server checks plus row-level security as a restricted role: `access.test.ts` ("RLS blocks cross-tenant reads even for raw SQL"), cross-business tests in the dashboard, Shopify, assistant, voice, insight and action suites; support access is read-only and audited |
+| Connections authorize and select the correct assets | `shopify.test.ts`, `google.test.ts`, `hubspot.test.ts`: OAuth with verified state (tampered or reused state rejected), partial grants refused, asset discovery with each asset's timezone and currency |
+| Real imported figures reconcile with the source for the tested period | "imports orders and the numbers reconcile with the source" (Shopify), daily reports and breakdowns (GA4, Search Console, Ads), CRM metrics (HubSpot), all against provider stand-ins with known data |
+| Syncs handle retries and duplicated events | Idempotent re-syncs, webhooks processed once with verified signatures, token refresh once, no retry storms on revoked credentials; Stripe events applied once and in order |
+| Dashboard edits persist after refresh | "persists edits with versions, detects conflicts and restores"; Stage 2 walkthrough reload |
+| AI-generated dashboards use valid available metrics | "proposes a dashboard (validated), then applies and undoes it"; templates include only widgets whose metrics are available |
+| Assistant answers reference actual data | "answers with evidence built from the real query result"; evidence is built on the server from the query result, citations are checked against it |
+| Voice supports interruption and text fallback | Stage 6: barge-in with streaming recognition, browser speech fallback, text always shown (`voice.test.ts` and the fake-microphone walkthrough) |
+| Stale and missing data are visibly identified | "reports missing data as unavailable, never zero", "marks partial coverage…"; data-health insights; freshness on every evidence card |
+| External actions require the correct permissions and approvals | `actions.test.ts`: analysts and viewers can't approve, approval bound to the payload hash, high-risk needs a second administrator, approver re-checked at execution, platform flag honoured |
+| Repeated execution does not duplicate changes | Single execution under a row lock and idempotency key; ambiguous 503 resolved by a status check (one provider write); automation runs and notifications de-duplicated |
+| Mobile layouts and keyboard access work | 390px walkthroughs in every stage (no horizontal overflow); skip link, visible focus, keyboard-operable tabs, dialogs and menus, reduced-motion support |
+| No secrets appear in browser code or logs | Secrets read only in `config.ts` and the server modules; short-lived voice tokens only; config status shows presence only (tested); bundle and log scan above |
+
+**Needs live credentials to finish verification**: Shopify, Google (GA4/Search Console/Ads), HubSpot, Anthropic, Deepgram and Stripe were exercised against faithful local stand-ins. Each one needs a final check with real accounts (see each stage's *External setup*).

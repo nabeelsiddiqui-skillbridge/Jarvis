@@ -166,7 +166,7 @@ export function Chat({ business, conversationId, onConversation, onMissing, comp
       </div>
       <VoiceBar voice={voice} compact={compact} />
       <Composer value={draft} onChange={setDraft} onSend={() => send(draft)} onStop={() => { abortRef.current?.abort(); }} busy={busy} disabled={configured === false} compact={compact} businessName={business.name}
-        onVoice={voice.state === "off" ? () => voice.start() : undefined} />
+        onVoice={voice.state === "off" ? () => voice.start() : undefined} voiceUnavailable={status.data?.voiceReason ?? null} />
     </div>
   );
 }
@@ -227,8 +227,8 @@ function EvidencePanel({ evidence: e, open }: { evidence: Evidence | undefined; 
   );
 }
 
-function Composer({ value, onChange, onSend, onStop, busy, disabled, compact, businessName, onVoice }: {
-  value: string; onChange: (v: string) => void; onSend: () => void; onStop: () => void; busy: boolean; disabled: boolean; compact?: boolean; businessName: string; onVoice?: () => void;
+function Composer({ value, onChange, onSend, onStop, busy, disabled, compact, businessName, onVoice, voiceUnavailable }: {
+  value: string; onChange: (v: string) => void; onSend: () => void; onStop: () => void; busy: boolean; disabled: boolean; compact?: boolean; businessName: string; onVoice?: () => void; voiceUnavailable?: string | null;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
@@ -247,7 +247,7 @@ function Composer({ value, onChange, onSend, onStop, busy, disabled, compact, bu
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); if (!busy) onSend(); } }}
           className="max-h-[180px] min-h-[36px] flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-fg outline-none placeholder:text-subtle disabled:opacity-60" />
         {onVoice && !busy && !value.trim() && (
-          <button type="button" onClick={onVoice} disabled={disabled} aria-label="Talk to the assistant" title="Voice conversation" className="grid size-9 shrink-0 place-items-center rounded-lg text-muted hover:bg-white/5 hover:text-accent disabled:opacity-40"><Mic className="size-4" /></button>
+          <button type="button" onClick={onVoice} disabled={disabled || Boolean(voiceUnavailable)} aria-label={voiceUnavailable ? `Voice unavailable: ${voiceUnavailable}` : "Talk to the assistant"} title={voiceUnavailable ?? "Voice conversation"} className="grid size-9 shrink-0 place-items-center rounded-lg text-muted hover:bg-white/5 hover:text-accent disabled:opacity-40"><Mic className="size-4" /></button>
         )}
         {busy ? (
           <button type="button" onClick={onStop} aria-label="Stop generating" className="grid size-9 shrink-0 place-items-center rounded-lg bg-raised text-fg hover:bg-white/10"><Square className="size-3.5 fill-current" /></button>

@@ -35,8 +35,17 @@ overviewRouter.get("/businesses/:businessId/overview", async (req, res) => {
           [business.id],
         )
       : { rows: [] };
+    // Getting-started progress (counts of what this user can see).
+    const setup = (await db.query(
+      `SELECT (SELECT count(*) FROM connections WHERE business_id = $1 AND disconnected_at IS NULL AND NOT is_demo)::int AS connections,
+              (SELECT count(*) FROM dashboards WHERE business_id = $1)::int AS dashboards,
+              (SELECT count(*) FROM conversations WHERE business_id = $1)::int AS conversations,
+              (SELECT count(*) FROM automations WHERE business_id = $1)::int AS automations`,
+      [business.id],
+    )).rows[0];
     return {
       isDemo: business.is_demo,
+      setup: { connected: setup.connections > 0, dataImported: kpis.length > 0, dashboard: setup.dashboards > 0, asked: setup.conversations > 0, goals: goals.rows.length > 0, automation: setup.automations > 0 },
       kpis,
       revenueTrend,
       acquisitionTrend,

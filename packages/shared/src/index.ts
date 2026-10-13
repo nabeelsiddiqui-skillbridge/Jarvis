@@ -9,3 +9,4 @@ export * from "./assistant.js";
 export * from "./speech.js";
 export * from "./insights.js";
 export * from "./actions.js";
+export * from "./billing.js";

@@ -10,6 +10,7 @@ import { getConnector } from "../connectors/registry.js";
 import type { ActionContext, ActionDefinition, ActionPayload, AssetRow, ConnectionRow } from "../connectors/types.js";
 import { PROVIDER_META } from "../metrics/providers.js";
 import { enqueue } from "../jobs/queue.js";
+import { assertEnabled, isEnabled } from "../lib/flags.js";
 
 /**
  * External actions.
@@ -36,6 +37,8 @@ export const hashPayload = (p: ActionPayload) => createHash("sha256").update(can
 export function findAction(provider: string, type: string): ActionDefinition | null {
   return getConnector(provider)?.actionDefs?.find((a) => a.type === type) ?? null;
 }
+
+const FLAG_OFF = "External actions are turned off for this workspace by the platform administrator.";
 
 function unavailable(connection: ConnectionRow, def: ActionDefinition): string | null {
   if (connection.is_demo) return "Actions aren't available on demo data — nothing would be changed anywhere.";
@@ -66,9 +69,10 @@ async function contextFor(db: pg.PoolClient, connection: ConnectionRow, assetId:
 export async function listActionTypes(db: pg.PoolClient, businessId: string): Promise<ActionTypeInfo[]> {
   const conns = (await db.query(`SELECT id, workspace_id, business_id, provider, display_name, external_account_id, status, scopes, settings, is_demo FROM connections WHERE business_id = $1 AND disconnected_at IS NULL ORDER BY created_at`, [businessId])).rows as ConnectionRow[];
   const out: ActionTypeInfo[] = [];
+  const enabled = conns.length ? await isEnabled("external_actions", conns[0]!.workspace_id) : true;
   for (const c of conns) {
     for (const a of getConnector(c.provider)?.actionDefs ?? []) {
-      const reason = unavailable(c, a);
+      const reason = enabled ? unavailable(c, a) : FLAG_OFF;
       out.push({ type: a.type, label: a.label, description: a.description, targetKind: a.targetKind, connectionId: c.id, connectionName: c.display_name, provider: c.provider, providerName: PROVIDER_META[c.provider]?.name ?? c.provider, available: !reason, unavailableReason: reason });
     }
   }
@@ -89,6 +93,7 @@ export async function listTargets(db: pg.PoolClient, businessId: string, connect
  * happen with server-held credentials and never reach the browser).
  */
 export async function propose(db: pg.PoolClient, p: { business: { id: string; workspace_id: string; name: string }; userId: string; connectionId: string; type: string; targetId: string; params: Record<string, unknown>; source: "user" | "assistant"; conversationId?: string | null }) {
+  await assertEnabled("external_actions", p.business.workspace_id);
   const c = await loadConnection(db, p.business.id, p.connectionId);
   const def = findAction(c.provider, p.type);
   if (!def) throw notFound("Action");
@@ -130,6 +135,7 @@ export async function notifyApprovers(db: pg.PoolClient, business: { id: string;
 export async function decide(db: pg.PoolClient, p: { business: { id: string; workspace_id: string }; userId: string; proposalId: string; payloadHash: string; decision: "approved" | "rejected"; comment?: string }) {
   const row = (await db.query(`SELECT * FROM action_proposals WHERE id = $1 AND business_id = $2 FOR UPDATE`, [p.proposalId, p.business.id])).rows[0];
   if (!row) throw notFound("Action");
+  if (p.decision === "approved") await assertEnabled("external_actions", p.business.workspace_id);
   if (row.status !== "pending_approval") throw conflict(`This action is ${row.status.replace(/_/g, " ")}; it can't be ${p.decision} now.`);
   if (new Date(row.expires_at) < new Date()) {
     await db.query(`UPDATE action_proposals SET status = 'expired', updated_at = now() WHERE id = $1`, [row.id]);
@@ -213,6 +219,8 @@ export async function executeProposal(db: pg.PoolClient, proposalId: string): Pr
     await finish(db, row, "succeeded", { result: { confirmedBy: "status_check", live } });
     return "done";
   }
+  // Checked after the status read so an ambiguous earlier attempt is still resolved truthfully.
+  if (!(await isEnabled("external_actions", row.workspace_id))) return fail(`${FLAG_OFF} Nothing was changed.`);
   if (!same(live, row.current_state)) {
     await attempt(db, row, n, "status_check", "drift", { expected: row.current_state, live });
     return fail("The value in the connected account changed after this was approved, so nothing was changed. Create a new proposal to review the current value.", { result: { live } });

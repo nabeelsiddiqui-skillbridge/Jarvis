@@ -1,5 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { config } from "../config.js";
+import { isEnabled } from "../lib/flags.js";
+import { recordUsage } from "../lib/usage.js";
 
 /**
  * One-shot text generation for explanations and narratives (insights, briefings,
@@ -12,8 +14,16 @@ export const aiConfigured = () => Boolean(config.anthropic.apiKey);
 
 export class AiUnavailable extends Error {}
 
-export async function aiText(p: { system: string; user: string; effort?: "low" | "medium" | "high"; maxTokens?: number }): Promise<{ text: string; model: string }> {
+export async function aiText(p: {
+  system: string;
+  user: string;
+  effort?: "low" | "medium" | "high";
+  maxTokens?: number;
+  /** Who the text is for: checked against the "assistant" feature flag and metered as background AI usage. */
+  usage: { workspaceId: string; businessId?: string | null; feature: string };
+}): Promise<{ text: string; model: string }> {
   if (!aiConfigured()) throw new AiUnavailable("AI is not configured");
+  if (!(await isEnabled("assistant", p.usage.workspaceId))) throw new AiUnavailable("AI features are turned off for this workspace");
   const msg = await anthropic().beta.messages.create({
     model: config.anthropic.model,
     max_tokens: p.maxTokens ?? 4000,
@@ -24,6 +34,7 @@ export async function aiText(p: { system: string; user: string; effort?: "low" |
     system: [{ type: "text", text: p.system, cache_control: { type: "ephemeral" } }],
     messages: [{ role: "user", content: p.user }],
   });
+  await recordUsage({ workspaceId: p.usage.workspaceId, businessId: p.usage.businessId, kind: "ai_background", meta: { feature: p.usage.feature, model: msg.model, input_tokens: msg.usage.input_tokens, output_tokens: msg.usage.output_tokens, cache_read_input_tokens: msg.usage.cache_read_input_tokens ?? 0 } });
   if (msg.stop_reason === "refusal") throw new Error("The AI provider declined to write this text.");
   const text = msg.content.filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === "text").map((b) => b.text).join("").trim();
   if (!text) throw new Error("The AI provider returned no text.");

@@ -7,6 +7,9 @@ import { inBusiness } from "../auth/access.js";
 import { prerequisite } from "../lib/errors.js";
 import { rateLimit } from "../lib/rateLimit.js";
 import { ProviderError, providerFetch, providerUrl } from "../connectors/http.js";
+import { assertWithinLimit } from "../billing/entitlements.js";
+import { assertEnabled } from "../lib/flags.js";
+import { recordUsage } from "../lib/usage.js";
 
 /**
  * Voice. Speech-to-text streams directly from the browser to Deepgram using a
@@ -39,9 +42,14 @@ voiceRouter.post(
   "/businesses/:businessId/voice/session",
   rateLimit({ name: "voice-session", max: 30, windowMs: 60_000, key: perUser }),
   async (req, res) => {
-    await inBusiness(req, req.params.businessId, "assistant.use", async () => undefined);
+    const business = await inBusiness(req, req.params.businessId, "assistant.use", async ({ business }) => business);
     if (!config.anthropic.apiKey) throw prerequisite("Voice needs the AI assistant, which isn't configured on this platform yet (ANTHROPIC_API_KEY).");
+    await assertEnabled("assistant", business.workspace_id);
+    await assertEnabled("voice", business.workspace_id);
+    await assertWithinLimit(business.workspace_id, "voiceSessions");
+    const meter = () => recordUsage({ workspaceId: business.workspace_id, businessId: business.id, userId: req.user!.id, kind: "voice_session", meta: { stt: config.voice.deepgramKey ? "deepgram" : "browser" } });
     if (!config.voice.deepgramKey) {
+      await meter();
       return res.json({
         stt: { provider: "browser" },
         tts: { provider: "browser" },
@@ -56,6 +64,7 @@ voiceRouter.post(
       if (e instanceof ProviderError) console.warn("[voice] token grant failed", e.kind, e.status, e.detail?.slice(0, 200));
       throw prerequisite("The voice service couldn't start a session right now. Try again, or use text.");
     }
+    await meter();
     res.setHeader("Cache-Control", "no-store");
     res.json({
       stt: { provider: "deepgram", url: listenUrl(), token: grant.access_token, expiresIn: grant.expires_in, authScheme: config.voice.wsAuthScheme },
@@ -73,7 +82,8 @@ voiceRouter.post(
   rateLimit({ name: "voice-speak", max: 240, windowMs: 60_000, key: perUser }),
   async (req, res) => {
     const body = speakBody.parse(req.body);
-    await inBusiness(req, req.params.businessId, "assistant.use", async () => undefined);
+    const business = await inBusiness(req, req.params.businessId, "assistant.use", async ({ business }) => business);
+    await assertEnabled("voice", business.workspace_id);
     if (!config.voice.deepgramKey) throw prerequisite("Server-side speech isn't configured (DEEPGRAM_API_KEY); the browser's built-in voice is used instead.");
     const q = new URLSearchParams({ model: config.voice.ttsModel, encoding: "mp3" });
     const upstream = await fetch(`${DG("v1/speak")}?${q}`, {
@@ -86,6 +96,7 @@ voiceRouter.post(
       console.warn("[voice] speak failed", upstream?.status);
       return res.status(502).json({ error: { code: "voice_unavailable", message: "The voice service didn't respond. The answer is still shown as text." } });
     }
+    await recordUsage({ workspaceId: business.workspace_id, businessId: business.id, userId: req.user!.id, kind: "tts_characters", quantity: body.text.length });
     res.setHeader("Content-Type", upstream.headers.get("content-type") ?? "audio/mpeg");
     res.setHeader("Cache-Control", "no-store");
     const stream = Readable.fromWeb(upstream.body as any);

@@ -14,6 +14,7 @@ import { aiConfigured } from "../ai/complete.js";
 import { executeRun, fireEvent, markRunFailed } from "../automations/engine.js";
 import { buildReport, reportPeriod, saveReport, type ReportKind } from "../reports/build.js";
 import { executeProposal, giveUp } from "../actions/engine.js";
+import { purgeExpiredData } from "../lib/retention.js";
 
 async function loadConnection(db: pg.PoolClient, id: string): Promise<ConnectionRow | null> {
   const { rows } = await db.query(`SELECT * FROM connections WHERE id = $1 AND disconnected_at IS NULL`, [id]);
@@ -84,6 +85,8 @@ export async function runJob(job: Job) {
         return await reportJob(db, job);
       case "action.execute":
         return await actionJob(db, job);
+      case "retention.purge":
+        return await complete(db, job.id, { purged: await purgeExpiredData() });
       default:
         await fail(db, job, `Unknown job type ${job.type}`, { retryable: false });
     }

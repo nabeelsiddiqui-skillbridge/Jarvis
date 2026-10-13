@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Navigate, Outlet, useMatch, useParams } from "react-router";
+import { Link, Navigate, Outlet, useMatch, useParams } from "react-router";
+import { ShieldAlert } from "lucide-react";
 import type { Business } from "@bca/shared";
 import { cn } from "@/lib/cn";
 import { patch } from "@/lib/api";
@@ -14,6 +15,7 @@ import { AssistantPanel } from "./AssistantPanel";
 import { MobileTabBar } from "./MobileTabBar";
 
 function AppShell({ workspaceId, business, navBusiness = business, title, children }: { workspaceId: string; business: Business | null; navBusiness?: Business | null; title?: string; children: ReactNode }) {
+  const support = Boolean(business?.support);
   const me = useMe();
   const [drawer, setDrawer] = useState(false);
   // The Assistant page is a full-height chat: no page padding, and no duplicate side panel.
@@ -55,10 +57,10 @@ function AppShell({ workspaceId, business, navBusiness = business, title, childr
             <main id="main" tabIndex={-1} className="flex min-w-0 flex-1 flex-col overflow-hidden pb-[calc(3rem+env(safe-area-inset-bottom))] focus:outline-none lg:pb-0">{children}</main>
           ) : (
             <main id="main" tabIndex={-1} className="min-w-0 flex-1 overflow-y-auto px-4 pb-24 pt-6 focus:outline-none sm:px-6 lg:px-8 lg:pb-10">
-              <div className="mx-auto max-w-[1400px]">{children}</div>
+              <div className="mx-auto max-w-[1400px]">{support && <SupportBanner business={business!} workspaceId={workspaceId} />}{children}</div>
             </main>
           )}
-          {business && assistantOpen && !fullBleed && <AssistantPanel business={business} onClose={toggleAssistant} />}
+          {business && assistantOpen && !fullBleed && !support && <AssistantPanel business={business} onClose={toggleAssistant} />}
         </div>
       </div>
       <MobileTabBar business={navBusiness} workspaceId={workspaceId} onMore={() => setDrawer(true)} />
@@ -73,7 +75,8 @@ export function BusinessLayout() {
   const me = useMe();
 
   useEffect(() => {
-    if (business.data) rememberBusiness(business.data.id, business.data.workspaceId);
+    // Support views of a customer's business never enter the administrator's own recents.
+    if (business.data && !business.data.support) rememberBusiness(business.data.id, business.data.workspaceId);
   }, [business.data?.id]);
 
   if (business.isPending) return <PageLoader />;
@@ -93,7 +96,7 @@ export function BusinessLayout() {
   return (
     <BusinessContext.Provider value={b}>
       <BusinessEvents businessId={b.id} />
-      <AppShell workspaceId={b.workspaceId} business={b}>
+      <AppShell workspaceId={b.support ? (me.data?.preferences.lastWorkspaceId ?? me.data?.workspaces[0]?.id ?? b.workspaceId) : b.workspaceId} business={b}>
         <Outlet key={b.id} />
       </AppShell>
     </BusinessContext.Provider>
@@ -119,4 +122,14 @@ export function WorkspaceLayout() {
 function BusinessEvents({ businessId }: { businessId: string }) {
   useBusinessEvents(businessId);
   return null;
+}
+
+function SupportBanner({ business, workspaceId }: { business: Business; workspaceId: string }) {
+  return (
+    <div role="status" className="mb-5 flex flex-wrap items-center gap-3 rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm">
+      <ShieldAlert className="size-5 shrink-0 text-warning" aria-hidden />
+      <p className="min-w-0 flex-1"><span className="font-semibold text-warning">Support access · read-only.</span> You're viewing {business.name} as platform staff. Every page you open is recorded in the customer's audit log; changes, exports and the assistant are blocked.</p>
+      <Link to={`/app/w/${workspaceId}/admin?tab=support`} className="font-medium text-accent hover:underline">Back to admin</Link>
+    </div>
+  );
 }

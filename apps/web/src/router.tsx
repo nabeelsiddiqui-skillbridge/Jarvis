@@ -5,6 +5,8 @@ import { Signup } from "./pages/auth/Signup";
 import { AcceptInvite } from "./pages/auth/AcceptInvite";
 import { MarketingLayout } from "./pages/marketing/MarketingLayout";
 import { Home } from "./pages/marketing/Home";
+import { Pricing } from "./pages/marketing/Pricing";
+import { Security } from "./pages/marketing/Security";
 import { AppIndex } from "./pages/app/AppIndex";
 import { Onboarding } from "./pages/app/Onboarding";
 import { BusinessLayout, WorkspaceLayout } from "./components/shell/Layouts";
@@ -17,7 +19,8 @@ import { BusinessSettings } from "./pages/app/BusinessSettings";
 import { Team } from "./pages/app/Team";
 import { WorkspaceSettings } from "./pages/app/WorkspaceSettings";
 import { Account } from "./pages/app/Account";
-import { StagePlaceholder } from "./pages/app/StagePlaceholder";
+import { Billing } from "./pages/app/Billing";
+import { Admin } from "./pages/app/Admin";
 import { Assistant } from "./pages/app/Assistant";
 import { Insights } from "./pages/app/Insights";
 import { Automations } from "./pages/app/Automations";
@@ -27,7 +30,11 @@ import { NotFound } from "./pages/NotFound";
 export const router = createBrowserRouter([
   {
     element: <MarketingLayout />,
-    children: [{ index: true, element: <Home /> }],
+    children: [
+      { index: true, element: <Home /> },
+      { path: "pricing", element: <Pricing /> },
+      { path: "security", element: <Security /> },
+    ],
   },
   { path: "/login", element: <Login /> },
   { path: "/signup", element: <Signup /> },
@@ -62,9 +69,9 @@ export const router = createBrowserRouter([
           { path: "businesses", element: <Businesses /> },
           { path: "team", element: <Team /> },
           { path: "settings", element: <WorkspaceSettings /> },
-          { path: "billing", element: <StagePlaceholder area="Billing" stage={9} /> },
+          { path: "billing", element: <Billing /> },
           { path: "account", element: <Account /> },
-          { path: "admin", element: <StagePlaceholder area="Platform administration" stage={9} /> },
+          { path: "admin", element: <Admin /> },
         ],
       },
     ],

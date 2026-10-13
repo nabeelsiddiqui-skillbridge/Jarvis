@@ -7,7 +7,7 @@ import nodemailer from "nodemailer";
 const url = () => process.env.SMTP_URL?.trim();
 export const emailConfigured = () => Boolean(url());
 
-let transport: nodemailer.Transporter | null = null;
+let transport: ReturnType<typeof nodemailer.createTransport> | null = null;
 
 export async function sendEmail(m: { to: string[]; subject: string; text: string; html?: string }) {
   if (!emailConfigured()) throw new Error("Email delivery isn't configured (SMTP_URL).");
