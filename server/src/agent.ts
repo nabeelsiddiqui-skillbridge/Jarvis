@@ -190,7 +190,7 @@ class Toolbox {
 
 // ----------------------------------------------------------------- context
 
-function contextBlock(accounts: Map<string, Account>, dash: DashboardState): string {
+function contextBlock(accounts: Map<string, Account>, dash: DashboardState, userName: string): string {
   const connected = [...accounts.values()].map((a) => {
     const c = getConnector(a.provider)!;
     return `- ${c.id} (${c.name})${a.demo ? " [demo data]" : ""}; metrics: ${c.metrics.map((m) => `${m.id} "${m.label}" viz=${m.viz.join("|")}`).join("; ")}`;
@@ -199,6 +199,7 @@ function contextBlock(accounts: Map<string, Account>, dash: DashboardState): str
   const widgets = dash.widgets.map((w) => `- id=${w.id} "${w.title}" ${w.provider}/${w.metric} viz=${w.viz} every ${w.refreshSec}s`);
   return [
     `<context>`,
+    `User: ${userName}`,
     `Local time: ${new Date().toString()}`,
     `Connected accounts:\n${connected.join("\n") || "(none yet)"}`,
     `Not connected (user can connect these from the Accounts panel): ${available.join(", ") || "none"}`,
@@ -231,7 +232,7 @@ const MODEL = process.env.JARVIS_MODEL || "claude-opus-5-5";
 const EFFORT = (process.env.JARVIS_EFFORT || "low") as "low" | "medium" | "high";
 const MAX_STEPS = 8;
 
-export async function runAgent(history: ChatTurn[], accounts: Map<string, Account>, dashboard: DashboardState): Promise<AgentResult> {
+export async function runAgent(history: ChatTurn[], accounts: Map<string, Account>, dashboard: DashboardState, userName = "there"): Promise<AgentResult> {
   const dash: DashboardState = structuredClone(dashboard);
   const toolbox = new Toolbox(accounts, dash);
   if (!client) return offlineAgent(history, accounts, dash, toolbox);
@@ -242,7 +243,7 @@ export async function runAgent(history: ChatTurn[], accounts: Map<string, Accoun
   while (recent.length && recent[0].role !== "user") recent.shift();
   const messages: Anthropic.Beta.BetaMessageParam[] = recent.map((t, i) => ({
     role: t.role,
-    content: i === recent.length - 1 ? `${contextBlock(accounts, dash)}\n\n${t.content}` : t.content,
+    content: i === recent.length - 1 ? `${contextBlock(accounts, dash, userName)}\n\n${t.content}` : t.content,
   }));
 
   for (let step = 0; step < MAX_STEPS; step++) {

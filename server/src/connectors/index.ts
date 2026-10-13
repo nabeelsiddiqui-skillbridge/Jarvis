@@ -5,7 +5,7 @@ import { crypto, hackernews } from "./public.js";
 import { weather } from "./weather.js";
 import { demoMetric, demoUpdates } from "./demo.js";
 import type { Connector, WidgetData } from "./types.js";
-import type { Account } from "../store.js";
+import { updateCreds, type Account } from "../store.js";
 
 export const CONNECTORS: Connector[] = [google, github, slackConnector, stripeConnector, weather, crypto, hackernews];
 
@@ -23,17 +23,27 @@ export const describeConnector = (c: Connector) => ({
   metrics: c.metrics,
 });
 
+/** Connectors may refresh OAuth tokens in place; save them so the next request reuses them. */
+async function withCredRefresh<T>(account: Account, fn: () => Promise<T>): Promise<T> {
+  const before = JSON.stringify(account.creds);
+  try {
+    return await fn();
+  } finally {
+    if (JSON.stringify(account.creds) !== before) updateCreds(account);
+  }
+}
+
 export async function accountUpdates(account: Account): Promise<string> {
   const c = getConnector(account.provider)!;
   if (account.demo) return demoUpdates(c.id);
-  return c.updates(account.creds);
+  return withCredRefresh(account, () => c.updates(account.creds));
 }
 
 export async function accountMetric(account: Account, metric: string): Promise<WidgetData> {
   const c = getConnector(account.provider)!;
   if (!c.metrics.some((m) => m.id === metric)) throw new Error(`${c.name} has no metric "${metric}"`);
   if (account.demo) return demoMetric(c.id, metric);
-  return c.fetchMetric(metric, account.creds);
+  return withCredRefresh(account, () => c.fetchMetric(metric, account.creds));
 }
 
 export type { Connector, WidgetData };

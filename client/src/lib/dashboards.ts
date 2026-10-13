@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
-import type { Dashboard, DashboardOp, GridItem, Viz, Widget } from "./types";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api } from "./api";
+import type { Dashboard, DashboardOp, DashboardsState, GridItem, Viz, Widget } from "./types";
 
-const KEY = "jarvis.dashboards.v1";
 const uid = () => Math.random().toString(36).slice(2, 10);
 
 export const newDashboard = (name: string, id = uid()): Dashboard => ({ id, name, widgets: [], layout: [] });
@@ -31,34 +31,52 @@ function addWidget(d: Dashboard, widget: Widget): Dashboard {
   return { ...d, widgets: [...d.widgets, widget], layout: [...d.layout, spot] };
 }
 
-interface State {
-  dashboards: Dashboard[];
-  activeId: string;
-}
+type State = DashboardsState;
 
-function load(): State {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (raw) {
-      const s = JSON.parse(raw) as State;
-      if (s.dashboards?.length) return s;
-    }
-  } catch {
-    /* storage unavailable or corrupt — start fresh */
-  }
+const LEGACY_KEY = "jarvis.dashboards.v1";
+
+export function emptyState(): State {
   const d = newDashboard("Command Center");
   return { dashboards: [d], activeId: d.id };
 }
 
-export function useDashboards() {
-  const [state, setState] = useState<State>(load);
+/**
+ * Dashboards from before accounts existed lived only in this browser. Offer them
+ * to the first account that signs in here, once.
+ */
+export function takeLegacyDashboards(): State | null {
+  try {
+    const raw = localStorage.getItem(LEGACY_KEY);
+    if (!raw) return null;
+    localStorage.removeItem(LEGACY_KEY);
+    const s = JSON.parse(raw) as State;
+    return s.dashboards?.length ? s : null;
+  } catch {
+    return null;
+  }
+}
+
+export type SaveStatus = "saved" | "saving" | "error";
+
+/** Dashboard state, saved to the user's account on the server (debounced). */
+export function useDashboards(initial: State) {
+  const [state, setState] = useState<State>(initial);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
+  const first = useRef(true);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(KEY, JSON.stringify(state));
-    } catch {
-      /* ignore quota / private mode */
+    if (first.current) {
+      first.current = false;
+      return;
     }
+    setSaveStatus("saving");
+    const t = setTimeout(() => {
+      api.saveDashboards(state).then(
+        () => setSaveStatus("saved"),
+        () => setSaveStatus("error"),
+      );
+    }, 700);
+    return () => clearTimeout(t);
   }, [state]);
 
   const active = state.dashboards.find((d) => d.id === state.activeId) ?? state.dashboards[0];
@@ -101,6 +119,7 @@ export function useDashboards() {
   return {
     dashboards: state.dashboards,
     active,
+    saveStatus,
     select: (id: string) => setState((s) => ({ ...s, activeId: id })),
     create: (name: string) => {
       const d = newDashboard(name);

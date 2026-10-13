@@ -363,3 +363,41 @@ code { font-family: var(--font-mono); font-size: 0.85em; color: var(--cyan-soft)
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; }
 }
+
+/* ------------------------------------------------------------------ auth + account */
+
+.auth { position: relative; min-height: 100%; display: grid; place-items: center; padding: 24px 16px; }
+.auth__panel {
+  position: relative; z-index: 1; width: min(420px, 100%);
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 28px 26px 22px; background: rgba(6, 14, 28, 0.88);
+}
+.auth__panel .form { width: 100%; margin-top: 14px; }
+.auth__title { margin: 4px 0 0; font-family: var(--font-display); font-weight: 900; letter-spacing: 0.3em; font-size: 24px; color: var(--cyan-soft); text-shadow: 0 0 16px var(--cyan-glow); }
+.auth__sub { margin: 0; color: var(--muted); letter-spacing: 0.18em; text-transform: uppercase; font-size: 13px; }
+.auth__switch { margin: 16px 0 0; font-size: 15px; }
+.auth__fine { margin: 10px 0 0; text-align: center; max-width: 320px; }
+.link-btn { background: none; border: 0; padding: 0; color: var(--cyan-soft); font-weight: 700; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+
+.user-btn {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 180px;
+  padding: 7px 11px; border-radius: 9px; cursor: pointer; font-weight: 700;
+  border: 1px solid var(--line); background: rgba(8, 18, 34, 0.6); color: var(--text);
+}
+.user-btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user-btn:hover { border-color: var(--cyan); color: var(--cyan-soft); }
+.telemetry .icon-btn--lg { width: 36px; height: 36px; }
+.chip--err { color: var(--red); border-color: rgba(251, 113, 133, 0.4); }
+
+.btn--danger { border-color: rgba(251, 113, 133, 0.6); color: #fecdd3; background: rgba(251, 113, 133, 0.12); }
+.btn--danger:hover:not(:disabled) { box-shadow: 0 0 16px rgba(251, 113, 133, 0.35); background: rgba(251, 113, 133, 0.2); }
+.settings-block { margin-top: 14px; padding: 14px; border-radius: 10px; border: 1px solid var(--line); background: rgba(3, 8, 16, 0.5); }
+.settings-block h3 { margin: 0; font-family: var(--font-display); font-size: 12px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--cyan-soft); }
+.settings-block--danger { border-color: rgba(251, 113, 133, 0.3); }
+.settings-block--danger h3 { color: var(--red); }
+.settings-block p { margin: 0; }
+.ok { color: var(--green); }
+
+@media (max-width: 860px) {
+  .user-btn span { display: none; }
+}

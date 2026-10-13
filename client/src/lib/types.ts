@@ -71,4 +71,17 @@ export interface ChatMessage {
 export interface Status {
   ai: "claude" | "offline";
   googleOAuth: boolean;
+  signup: boolean;
+}
+
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  createdAt: number;
+}
+
+export interface DashboardsState {
+  dashboards: Dashboard[];
+  activeId: string;
 }

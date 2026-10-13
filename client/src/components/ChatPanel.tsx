@@ -21,12 +21,13 @@ interface Props {
   voiceError: string | null;
   speakReplies: boolean;
   aiMode?: string;
+  userName: string;
   onSend: (text: string) => void;
   onMic: () => void;
   onToggleSpeak: () => void;
 }
 
-export function ChatPanel({ messages, orb, busy, listening, interim, voiceError, speakReplies, aiMode, onSend, onMic, onToggleSpeak }: Props) {
+export function ChatPanel({ messages, orb, busy, listening, interim, voiceError, speakReplies, aiMode, userName, onSend, onMic, onToggleSpeak }: Props) {
   const [text, setText] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -54,7 +55,7 @@ export function ChatPanel({ messages, orb, busy, listening, interim, voiceError,
         {messages.length === 0 && (
           <div className="msg msg--assistant">
             <div className="msg__body">
-              Good day. I'm JARVIS. Connect your accounts and ask me for updates — or have me build you a live dashboard.
+              Good day, {userName.split(" ")[0]}. I'm JARVIS. Connect your accounts and ask me for updates — or have me build you a live dashboard.
             </div>
           </div>
         )}
