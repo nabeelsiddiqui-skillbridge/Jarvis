@@ -24,6 +24,7 @@ import { commentaryRouter } from "./routes/commentary.js";
 import { actionsRouter } from "./routes/actions.js";
 import { billingRouter, billingWebhookRouter } from "./routes/billing.js";
 import { adminRouter } from "./routes/admin.js";
+import { importsBodyParser, importsRouter } from "./routes/imports.js";
 
 export function createApp() {
   const app = express();
@@ -42,6 +43,7 @@ export function createApp() {
   // Webhooks need the raw body for signature verification, so they're mounted before JSON parsing.
   app.use("/api", billingWebhookRouter); // before the generic /webhooks/:provider route
   app.use("/api", webhooksRouter);
+  app.use("/api/businesses/:businessId/imports", importsBodyParser); // CSV uploads up to 5 MB
   app.use("/api", express.json({ limit: "1mb" }));
   app.use("/api", sessionMiddleware);
 
@@ -81,6 +83,7 @@ export function createApp() {
   app.use("/api", actionsRouter);
   app.use("/api", billingRouter);
   app.use("/api", adminRouter);
+  app.use("/api", importsRouter);
 
   app.use("/api", (_req, res) => res.status(404).json({ error: { code: "not_found", message: "Unknown API route." } }));
 
