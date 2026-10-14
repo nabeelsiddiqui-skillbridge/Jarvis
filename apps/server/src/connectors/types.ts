@@ -161,7 +161,7 @@ export interface ConnectorDefinition {
    * credentials. Such tokens don't expire and aren't refreshed; webhooks aren't registered.
    */
   tokenConnect?: {
-    fields: { key: string; label: string; placeholder?: string; help?: string; secret?: boolean }[];
+    fields: { key: string; label: string; placeholder?: string; help?: string; secret?: boolean; optional?: boolean }[];
     instructions: string[];
     connect(input: Record<string, string>): Promise<CallbackResult>;
   };

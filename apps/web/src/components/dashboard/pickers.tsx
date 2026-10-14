@@ -3,7 +3,7 @@ import type { Catalog, CatalogMetric } from "@/lib/metrics";
 import { Input, Select } from "@/components/ui/Field";
 
 const CATEGORY_LABELS: Record<string, string> = {
-  sales: "Sales", profit: "Profit", acquisition: "Website & acquisition", advertising: "Advertising", seo: "Organic search", crm: "CRM & pipeline", calculated: "Calculated metrics",
+  sales: "Sales", profit: "Profit", acquisition: "Website & acquisition", advertising: "Advertising", seo: "Organic search", crm: "CRM & pipeline", payments: "Payments & subscriptions", email: "Email marketing", social: "Social media", support: "Customer support", accounting: "Accounting", inventory: "Inventory", calculated: "Calculated metrics",
 };
 
 export function allMetrics(c: Catalog | undefined): CatalogMetric[] {

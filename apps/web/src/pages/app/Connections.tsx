@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, Clock, ExternalLink, History, KeyRound, Loader2, Plug, RefreshCw, Settings2, ShieldCheck, Unplug, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock, Download, ExternalLink, FileUp, History, KeyRound, Loader2, Plug, RefreshCw, Settings2, ShieldCheck, Unplug, Upload, XCircle } from "lucide-react";
 import { can } from "@bca/shared";
 import { del, get, post, put, errorMessage } from "@/lib/api";
 import { useBusiness } from "@/lib/business";
@@ -25,9 +25,16 @@ interface CatalogEntry {
   metrics: string[]; actions: string[]; reportingDelay: string | null;
   connectFields?: { key: string; label: string; placeholder?: string; help?: string }[];
   supportsWebhooks: boolean;
+  /** Has a provider sign-in flow. */
+  oauth: boolean;
   /** Connect by pasting an access token created in the provider (works without platform OAuth credentials). */
-  tokenConnect: { fields: { key: string; label: string; placeholder?: string; help?: string; secret?: boolean }[]; instructions: string[] } | null;
+  tokenConnect: { fields: { key: string; label: string; placeholder?: string; help?: string; secret?: boolean; optional?: boolean }[]; instructions: string[] } | null;
 }
+
+/** Display order of catalog categories. */
+const CATEGORY_ORDER = ["Commerce", "Payments", "Advertising", "Analytics", "Search", "Social", "Email", "CRM", "Support", "Accounting", "Inventory", "Data import"];
+/** CSV files are uploaded from the browser rather than connected. */
+const isUpload = (e: { id: string }) => e.id === "csv";
 
 /** Whether a catalog entry can be connected right now, by either method. */
 const connectable = (e: CatalogEntry) => e.status === "available" || (Boolean(e.tokenConnect) && e.status !== "planned");
@@ -81,11 +88,21 @@ export function Connections() {
 
   const active = (connections.data ?? []).filter((c) => c.status !== "disconnected");
   const disconnected = (connections.data ?? []).filter((c) => c.status === "disconnected");
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState<string | null>(null);
+  const [uploading, setUploading] = useState<{ connectionId?: string } | null>(null);
+  const categories = useMemo(() => [...new Set((catalog.data ?? []).map((e) => e.category))].sort((a, b) => CATEGORY_ORDER.indexOf(a) - CATEGORY_ORDER.indexOf(b)), [catalog.data]);
   const groups = useMemo(() => {
+    const term = search.trim().toLowerCase();
     const m = new Map<string, CatalogEntry[]>();
-    for (const e of catalog.data ?? []) m.set(e.category, [...(m.get(e.category) ?? []), e]);
-    return [...m.entries()];
-  }, [catalog.data]);
+    for (const e of catalog.data ?? []) {
+      if (category && e.category !== category) continue;
+      if (term && !`${e.name} ${e.category} ${e.description}`.toLowerCase().includes(term)) continue;
+      m.set(e.category, [...(m.get(e.category) ?? []), e]);
+    }
+    return [...m.entries()].sort(([a], [b]) => CATEGORY_ORDER.indexOf(a) - CATEGORY_ORDER.indexOf(b));
+  }, [catalog.data, search, category]);
+  const openEntry = (e: CatalogEntry) => (isUpload(e) ? setUploading({}) : setConnecting(e));
 
   return (
     <>
@@ -104,7 +121,7 @@ export function Connections() {
         <h2 id="connected-h" className="mb-3 text-[15px] font-semibold">Connected accounts</h2>
         {connections.isPending ? <Skeleton className="h-40" /> : connections.error ? <ErrorState error={connections.error} onRetry={() => connections.refetch()} /> : active.length ? (
           <div className="grid gap-4 xl:grid-cols-2">
-            {active.map((c) => <ConnectionCard key={c.id} c={c} manage={manage && !c.isDemo} onChooseAssets={() => setAssetsFor(c)} onReconnect={() => setConnecting(catalog.data?.find((e) => e.id === c.provider) ?? null)} />)}
+            {active.map((c) => <ConnectionCard key={c.id} c={c} manage={manage && !c.isDemo} onChooseAssets={() => setAssetsFor(c)} onReconnect={() => setConnecting(catalog.data?.find((e) => e.id === c.provider) ?? null)} onUpload={c.provider === "csv" ? () => setUploading({ connectionId: c.id }) : undefined} />)}
           </div>
         ) : (
           <EmptyState icon={<Plug className="size-5" />} title="Nothing connected yet">Connect a source below. Imports run in the background; you can keep working while data arrives.</EmptyState>
@@ -119,8 +136,19 @@ export function Connections() {
 
       <section aria-labelledby="catalog-h">
         <h2 id="catalog-h" className="mb-1 text-[15px] font-semibold">Add a source</h2>
-        <p className="mb-4 text-sm text-muted">Connectors marked <b className="text-success">Available</b> are working integrations — some can also be connected with an access token from your own account. Planned ones are on the roadmap and can't be connected yet.</p>
-        {catalog.isPending ? <Skeleton className="h-60" /> : groups.map(([cat, entries]) => (
+        <p className="mb-4 text-sm text-muted">Connectors marked <b className="text-success">Available</b> are working integrations. Many connect with an API key or access token from your own account — you enter it here and it's encrypted on our servers.</p>
+        <div className="mb-5 flex flex-wrap items-center gap-2">
+          <Input aria-label="Search connectors" placeholder="Search connectors…" value={search} onChange={(e) => setSearch(e.target.value)} className="w-full sm:w-64" />
+          <div role="group" aria-label="Filter by category" className="flex flex-wrap gap-1.5">
+            {[null, ...categories].map((c) => (
+              <button key={c ?? "all"} type="button" aria-pressed={category === c} onClick={() => setCategory(c)}
+                className={cn("rounded-[4px] border px-2.5 py-1 font-mono text-[11px] uppercase tracking-wider transition-colors", category === c ? "border-accent/60 bg-accent/10 text-accent" : "border-line text-muted hover:border-line-strong hover:text-fg")}>
+                {c ?? "All"}
+              </button>
+            ))}
+          </div>
+        </div>
+        {catalog.isPending ? <Skeleton className="h-60" /> : !groups.length ? <p className="text-sm text-muted">No connectors match “{search}”.</p> : groups.map(([cat, entries]) => (
           <div key={cat} className="mb-6">
             <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-subtle">{cat}</h3>
             <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -128,13 +156,13 @@ export function Connections() {
                 <li key={e.id} className={cn("panel flex flex-col gap-3 p-4", e.status === "planned" && "opacity-70")}>
                   <div className="flex items-start justify-between gap-2">
                     <p className="font-semibold">{e.name}</p>
-                    {e.status === "config_required" && e.tokenConnect ? <Badge tone="success">Available · token</Badge> : <Badge tone={STATUS_LABEL[e.status].tone}>{STATUS_LABEL[e.status].label}</Badge>}
+                    {e.status === "config_required" && e.tokenConnect ? <Badge tone="success">Available · token</Badge> : e.status === "available" && isUpload(e) ? <Badge tone="success">Available · upload</Badge> : <Badge tone={STATUS_LABEL[e.status].tone}>{STATUS_LABEL[e.status].label}</Badge>}
                   </div>
                   <p className="text-sm text-muted">{e.description}</p>
                   <p className="text-xs text-subtle">{e.statusNote}</p>
                   {e.status !== "planned" && (
-                    <Button size="sm" variant={connectable(e) ? "primary" : "secondary"} className="mt-auto self-start" disabled={!manage || b.isDemo} onClick={() => setConnecting(e)}>
-                      {connectable(e) ? "Connect" : "Details"}
+                    <Button size="sm" variant={connectable(e) ? "primary" : "secondary"} className="mt-auto self-start" disabled={!manage || b.isDemo} onClick={() => openEntry(e)}>
+                      {isUpload(e) ? "Upload CSV" : connectable(e) ? "Connect" : "Details"}
                     </Button>
                   )}
                 </li>
@@ -152,6 +180,7 @@ export function Connections() {
           toast("Connected — choose what to sync");
           if (c?.status === "selecting_assets") setAssetsFor(c);
         }} />
+      <CsvUploadDialog open={Boolean(uploading)} connectionId={uploading?.connectionId} onClose={() => setUploading(null)} onDone={() => { setUploading(null); qc.invalidateQueries({ queryKey: ["b", b.id] }); }} />
       <AssetsDialog connection={assetsFor} onClose={() => setAssetsFor(null)} onSaved={() => { setAssetsFor(null); qc.invalidateQueries({ queryKey: connectionsKey(b.id) }); toast("Import started — data appears as it arrives."); }} />
     </>
   );
@@ -171,7 +200,7 @@ function StatusBadge({ c }: { c: Connection }) {
   return <Badge tone={s.tone} icon={s.icon}>{s.label}</Badge>;
 }
 
-function ConnectionCard({ c, manage, onChooseAssets, onReconnect }: { c: Connection; manage: boolean; onChooseAssets: () => void; onReconnect: () => void }) {
+function ConnectionCard({ c, manage, onChooseAssets, onReconnect, onUpload }: { c: Connection; manage: boolean; onChooseAssets: () => void; onReconnect: () => void; onUpload?: () => void }) {
   const b = useBusiness();
   const qc = useQueryClient();
   const toast = useToast();
@@ -226,7 +255,7 @@ function ConnectionCard({ c, manage, onChooseAssets, onReconnect }: { c: Connect
           {missingScopes.length > 0 && <span className="w-full text-xs text-warning">Missing: {missingScopes.map((s) => s.scope).join(", ")} — reconnect to grant.</span>}
         </dd>
         <dt className="text-subtle">Live updates</dt>
-        <dd>{c.webhookTopics.length ? `Webhooks active (${c.webhookTopics.length} topics)` : "Scheduled syncs"}</dd>
+        <dd>{onUpload ? "Updated when you upload a new file" : c.webhookTopics.length ? `Webhooks active (${c.webhookTopics.length} topics)` : "Scheduled syncs"}</dd>
       </dl>
 
       {manage && (
@@ -235,6 +264,8 @@ function ConnectionCard({ c, manage, onChooseAssets, onReconnect }: { c: Connect
             <Button size="sm" variant="primary" icon={<KeyRound className="size-4" />} onClick={onReconnect}>Reconnect</Button>
           ) : c.status === "selecting_assets" ? (
             <Button size="sm" variant="primary" icon={<Settings2 className="size-4" />} onClick={onChooseAssets}>Choose accounts</Button>
+          ) : onUpload ? (
+            <Button size="sm" icon={<Upload className="size-4" />} onClick={onUpload}>Upload new file</Button>
           ) : (
             <Button size="sm" icon={<RefreshCw className={cn("size-4", sync.isPending && "animate-spin")} />} onClick={() => sync.mutate()} disabled={c.status === "syncing"}>Sync now</Button>
           )}
@@ -254,7 +285,7 @@ function ConnectDialog({ entry, onClose, reconnectId, onConnected }: { entry: Ca
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const oauthReady = entry?.status === "available";
+  const oauthReady = entry?.status === "available" && entry.oauth;
   const [method, setMethod] = useState<"oauth" | "token">("oauth");
   useEffect(() => { setValues({}); setError(null); setMethod(entry && !oauthReady && entry.tokenConnect ? "token" : "oauth"); }, [entry?.id, oauthReady]);
   if (!entry) return null;
@@ -276,7 +307,7 @@ function ConnectDialog({ entry, onClose, reconnectId, onConnected }: { entry: Ca
     }
   };
   const token = entry.tokenConnect;
-  const canSubmit = method === "token" ? Boolean(token?.fields.every((f) => values[f.key]?.trim())) : oauthReady;
+  const canSubmit = method === "token" ? Boolean(token?.fields.every((f) => f.optional || values[f.key]?.trim())) : oauthReady;
   return (
     <Dialog open onClose={onClose} title={`${reconnectId ? "Reconnect" : "Connect"} ${entry.name}`} size="lg"
       footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button>{(method === "token" ? Boolean(token) : oauthReady) && (
@@ -284,7 +315,7 @@ function ConnectDialog({ entry, onClose, reconnectId, onConnected }: { entry: Ca
       )}</>}>
       <div className="space-y-5 text-sm">
         <p className="text-muted">{entry.description}</p>
-        {token && (
+        {token && entry.oauth && (
           <Tabs value={method} onChange={(v) => { setMethod(v); setError(null); }} items={[{ value: "oauth", label: `Sign in with ${entry.name}` }, { value: "token", label: "Use an access token" }]} />
         )}
         {method === "oauth" && (
@@ -304,20 +335,20 @@ function ConnectDialog({ entry, onClose, reconnectId, onConnected }: { entry: Ca
           <>
             <ol className="list-decimal space-y-1.5 pl-5 text-muted">{token.instructions.map((t) => <li key={t}>{t}</li>)}</ol>
             {token.fields.map((f) => (
-              <Field key={f.key} label={f.label} hint={f.help}>{(p) => <Input {...p} type={f.secret ? "password" : "text"} autoComplete="off" spellCheck={false} placeholder={f.placeholder} value={values[f.key] ?? ""} onChange={(e) => setValues({ ...values, [f.key]: e.target.value })} />}</Field>
+              <Field key={f.key} label={`${f.label}${f.optional ? " (optional)" : ""}`} hint={f.help}>{(p) => <Input {...p} type={f.secret ? "password" : "text"} autoComplete="off" spellCheck={false} placeholder={f.placeholder} value={values[f.key] ?? ""} onChange={(e) => setValues({ ...values, [f.key]: e.target.value })} />}</Field>
             ))}
-            <p className="text-xs text-subtle">The token is checked with {entry.name}, encrypted before it's stored and never shown again. Data syncs on a schedule (live webhooks need one-click sign-in). You can revoke the token in {entry.name} at any time.</p>
+            <p className="text-xs text-subtle">The key is checked with {entry.name}, encrypted before it's stored and never shown again. Data syncs on a schedule. You can revoke it in {entry.name} at any time.</p>
           </>
         )}
-        <div>
+        {entry.scopes.length > 0 && <div>
           <p className="mb-2 font-medium">Permissions needed (read-only)</p>
           <ul className="space-y-1.5">
             {entry.scopes.map((s) => (
               <li key={s.scope} className="flex gap-2"><ShieldCheck className="mt-0.5 size-4 shrink-0 text-accent" /><span><code className="break-all text-xs text-fg">{shortScope(s.scope)}</code> — <span className="text-muted">{s.reason}{s.optional ? " (optional)" : ""}</span></span></li>
             ))}
           </ul>
-        </div>
-        {entry.accessRequirements.length > 0 && method === "oauth" && (
+        </div>}
+        {entry.accessRequirements.length > 0 && (
           <details>
             <summary className="cursor-pointer text-muted">Provider requirements</summary>
             <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-muted">{entry.accessRequirements.map((r) => <li key={r}>{r}</li>)}</ul>
@@ -433,6 +464,73 @@ function HistoryDialog({ open, onClose, c }: { open: boolean; onClose: () => voi
             ))}
           </tbody>
         </table>
+      )}
+    </Dialog>
+  );
+}
+
+interface UploadResult { connectionId: string; rows: number; metrics: { key: string; label: string }[]; from: string | null; to: string | null; ignoredColumns: string[]; warnings: string[] }
+interface ImportColumn { key: string; label: string; unit: string; aggregation: string; category: string }
+
+/** Upload daily figures as CSV (a new import, or a replacement file for an existing one). */
+function CsvUploadDialog({ open, connectionId, onClose, onDone }: { open: boolean; connectionId?: string; onClose: () => void; onDone: () => void }) {
+  const b = useBusiness();
+  const toast = useToast();
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<UploadResult | null>(null);
+  const columns = useQuery({ queryKey: ["b", b.id, "import-columns"], queryFn: ({ signal }) => get<ImportColumn[]>(`/businesses/${b.id}/imports/columns`, signal), enabled: open });
+  useEffect(() => { if (open) { setFile(null); setError(null); setResult(null); } }, [open]);
+  if (!open) return null;
+  const MAX = 5 * 1024 * 1024;
+  const upload = async () => {
+    if (!file) return;
+    if (file.size > MAX) return setError("That file is larger than 5 MB. Split it into smaller files.");
+    setBusy(true);
+    setError(null);
+    try {
+      const content = await file.text();
+      const r = await post<UploadResult>(`/businesses/${b.id}/imports/csv`, { fileName: file.name, content, ...(connectionId ? { connectionId } : {}) });
+      setResult(r);
+      toast(`Imported ${r.rows} row${r.rows === 1 ? "" : "s"}`);
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Dialog open onClose={result ? onDone : onClose} title={connectionId ? "Upload a replacement file" : "Upload figures from a CSV file"} size="lg"
+      footer={result ? <Button variant="primary" onClick={onDone}>Done</Button> : <><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} disabled={!file} onClick={upload} icon={<Upload className="size-4" />}>Upload</Button></>}>
+      {result ? (
+        <div className="space-y-3 text-sm">
+          <p className="flex items-center gap-2 text-success"><CheckCircle2 className="size-4" />{result.rows} rows imported{result.from ? ` · ${result.from} → ${result.to}` : ""}</p>
+          <p className="text-muted">Metrics: {result.metrics.map((m) => m.label).join(", ") || "none"}</p>
+          {result.ignoredColumns.length > 0 && <p className="text-xs text-warning">Ignored columns (not recognised): {result.ignoredColumns.join(", ")}</p>}
+          {result.warnings.length > 0 && <ul className="list-disc space-y-1 pl-5 text-xs text-warning">{result.warnings.slice(0, 8).map((w) => <li key={w}>{w}</li>)}{result.warnings.length > 8 && <li>…and {result.warnings.length - 8} more</li>}</ul>}
+          <p className="text-xs text-subtle">Figures from uploads are used only for metrics no connected platform provides.</p>
+        </div>
+      ) : (
+        <div className="space-y-4 text-sm">
+          <p className="text-muted">One row per day: a <code className="text-fg">date</code> column (YYYY-MM-DD) and one column per metric, named by the metric's name or key. Empty cells mean “no data”, not zero. Money is in {b.currency} unless you add a <code className="text-fg">currency</code> column.{connectionId ? " The new file replaces everything from the previous one." : ""}</p>
+          <a className="inline-flex items-center gap-1.5 text-accent hover:underline" href={`/api/businesses/${b.id}/imports/csv/template`} download><Download className="size-4" />Download a template</a>
+          <label className="flex cursor-pointer flex-col items-center gap-2 rounded-[6px] border border-dashed border-line-strong px-4 py-8 text-center hover:border-accent/60">
+            <FileUp className="size-6 text-accent" />
+            <span className="font-medium">{file ? file.name : "Choose a .csv file"}</span>
+            <span className="text-xs text-subtle">{file ? `${(file.size / 1024).toFixed(1)} KB` : "Up to 5 MB"}</span>
+            <input type="file" accept=".csv,text/csv" className="sr-only" onChange={(e) => { setFile(e.target.files?.[0] ?? null); setError(null); }} />
+          </label>
+          {columns.data && (
+            <details>
+              <summary className="cursor-pointer text-muted">Columns you can import ({columns.data.length})</summary>
+              <ul className="mt-2 grid max-h-56 gap-x-4 gap-y-1 overflow-y-auto text-xs sm:grid-cols-2">
+                {columns.data.map((c) => <li key={c.key}><code className="text-fg">{c.key}</code> <span className="text-muted">— {c.label}{c.aggregation === "snapshot" ? " (end-of-day level)" : ""}</span></li>)}
+              </ul>
+            </details>
+          )}
+          {error && <p role="alert" className="whitespace-pre-line text-danger">{error}</p>}
+        </div>
       )}
     </Dialog>
   );

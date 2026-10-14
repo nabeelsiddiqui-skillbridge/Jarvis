@@ -4,13 +4,35 @@ import { ga4 } from "./google/ga4.js";
 import { gsc } from "./google/gsc.js";
 import { googleAds } from "./google/ads.js";
 import { hubspot } from "./hubspot/index.js";
+import { metaAds } from "./meta/ads.js";
+import { facebookPages } from "./meta/pages.js";
+import { instagram } from "./meta/instagram.js";
+import { tiktokAds } from "./tiktok/index.js";
+import { linkedinAds } from "./linkedin/index.js";
+import { woocommerce } from "./woocommerce/index.js";
+import { stripe } from "./stripe/index.js";
+import { klaviyo } from "./klaviyo/index.js";
+import { mailchimp } from "./mailchimp/index.js";
+import { brevo } from "./brevo/index.js";
+import { zendesk } from "./zendesk/index.js";
+import { intercom } from "./intercom/index.js";
+import { salesforce } from "./salesforce/index.js";
+import { gohighlevel } from "./gohighlevel/index.js";
+import { quickbooks } from "./quickbooks/index.js";
+import { xero } from "./xero/index.js";
+import { googleSheets } from "./sheets/index.js";
+import { csvUpload } from "./sheets/csv.js";
 
 /**
  * Connector catalog. Implemented connectors carry full definitions; planned ones
  * are listed so users can see the roadmap, and are always shown as "Planned" —
  * never as working integrations.
  */
-export const IMPLEMENTED: ConnectorDefinition[] = [shopify, ga4, gsc, googleAds, hubspot];
+const ALL: ConnectorDefinition[] = [
+  shopify, woocommerce, ga4, gsc, googleAds, metaAds, tiktokAds, linkedinAds, facebookPages, instagram,
+  hubspot, salesforce, gohighlevel, stripe, klaviyo, mailchimp, brevo, zendesk, intercom, quickbooks, xero, googleSheets, csvUpload,
+];
+export const IMPLEMENTED: ConnectorDefinition[] = ALL.filter((d) => d.implemented);
 
 interface PlannedEntry {
   id: string;
@@ -21,22 +43,24 @@ interface PlannedEntry {
   accessRequirements?: string[];
 }
 
+/** Shown as "Planned" until the connector's implementation is registered above. */
 const PLANNED: PlannedEntry[] = [
-  { id: "meta_ads", name: "Meta Ads", category: "Advertising", description: "Facebook & Instagram ad spend and results.", accessRequirements: ["Meta app review for ads_read."] },
+  { id: "meta_ads", name: "Meta Ads", category: "Advertising", description: "Facebook & Instagram ad spend and results." },
   { id: "facebook_pages", name: "Facebook Pages", category: "Social", description: "Page reach, engagement and followers." },
-  { id: "instagram", name: "Instagram (professional)", category: "Social", description: "Reach, engagement and follower growth." },
-  { id: "woocommerce", name: "WooCommerce", category: "Commerce", description: "Orders and revenue from WooCommerce stores." },
+  { id: "instagram", name: "Instagram", category: "Social", description: "Reach, engagement and follower growth." },
+  { id: "woocommerce", name: "WooCommerce", category: "Commerce", description: "Orders, revenue and stock from WooCommerce stores." },
   { id: "gohighlevel", name: "GoHighLevel", category: "CRM", description: "Contacts, opportunities and pipelines." },
-  { id: "linkedin", name: "LinkedIn", category: "Social", description: "Page analytics and LinkedIn Ads.", accessRequirements: ["LinkedIn Marketing Developer Platform approval."] },
-  { id: "tiktok", name: "TikTok", category: "Advertising", description: "TikTok Ads spend and results." },
-  { id: "klaviyo", name: "Klaviyo", category: "Email", description: "Email and SMS campaign performance and attributed revenue." },
-  { id: "mailchimp", name: "Mailchimp", category: "Email", description: "Campaign opens, clicks and list growth." },
+  { id: "linkedin_ads", name: "LinkedIn Ads", category: "Advertising", description: "LinkedIn Ads spend and results." },
+  { id: "tiktok_ads", name: "TikTok Ads", category: "Advertising", description: "TikTok Ads spend and results." },
+  { id: "klaviyo", name: "Klaviyo", category: "Email", description: "Email performance and subscribers." },
+  { id: "mailchimp", name: "Mailchimp", category: "Email", description: "Campaign opens, clicks and audience size." },
   { id: "brevo", name: "Brevo", category: "Email", description: "Email campaigns and contacts." },
   { id: "salesforce", name: "Salesforce", category: "CRM", description: "Leads, opportunities and pipeline." },
-  { id: "stripe", name: "Stripe", category: "Payments", description: "Collected revenue, refunds, subscriptions and MRR." },
-  { id: "accounting", name: "Accounting (QuickBooks, Xero)", category: "Accounting", description: "Revenue, expenses and profit from your books." },
-  { id: "support", name: "Support (Zendesk, Intercom)", category: "Support", description: "Ticket volume, response times and satisfaction." },
-  { id: "inventory", name: "Inventory systems", category: "Inventory", description: "Stock levels and stock-outs." },
+  { id: "stripe", name: "Stripe", category: "Payments", description: "Collected payments, refunds, subscriptions and MRR." },
+  { id: "quickbooks", name: "QuickBooks Online", category: "Accounting", description: "Revenue, expenses and profit from your books." },
+  { id: "xero", name: "Xero", category: "Accounting", description: "Revenue, expenses and profit from your books." },
+  { id: "zendesk", name: "Zendesk", category: "Support", description: "Ticket volume, reply times and satisfaction." },
+  { id: "intercom", name: "Intercom", category: "Support", description: "Conversation volume, reply times and ratings." },
   { id: "csv", name: "CSV upload", category: "Data import", description: "Upload your own daily figures as CSV." },
   { id: "google_sheets", name: "Google Sheets", category: "Data import", description: "Sync figures maintained in a spreadsheet." },
 ];
@@ -67,6 +91,8 @@ export interface CatalogEntry {
   reportingDelay: string | null;
   connectFields: ConnectorDefinition["connectFields"];
   supportsWebhooks: boolean;
+  /** Has a provider sign-in (OAuth) flow. */
+  oauth: boolean;
   /** Connect with an access token instead of OAuth (works without platform app credentials). */
   tokenConnect: { fields: NonNullable<ConnectorDefinition["tokenConnect"]>["fields"]; instructions: string[] } | null;
 }
@@ -81,7 +107,7 @@ export function catalog(): CatalogEntry[] {
       description: d.description,
       status,
       statusNote:
-        status === "available" ? "Ready to connect."
+        status === "available" ? (d.authorizeUrl || !d.tokenConnect ? "Ready to connect." : "Connect with an API key or token from your account.")
         : status === "config_required" ? (d.tokenConnect ? "Connect with an access token from your account, or a platform administrator can add app credentials for one-click sign-in." : "A platform administrator must add this provider's app credentials (Admin → Credentials) before it can be connected.")
         : "Waiting for the provider to approve access for this platform.",
       missingConfig,
@@ -92,6 +118,7 @@ export function catalog(): CatalogEntry[] {
       reportingDelay: d.reportingDelay,
       connectFields: d.connectFields,
       supportsWebhooks: d.supportsWebhooks,
+      oauth: Boolean(d.authorizeUrl),
       tokenConnect: d.tokenConnect ? { fields: d.tokenConnect.fields, instructions: d.tokenConnect.instructions } : null,
     };
   });
@@ -110,6 +137,7 @@ export function catalog(): CatalogEntry[] {
     reportingDelay: null,
     connectFields: [],
     supportsWebhooks: false,
+    oauth: false,
     tokenConnect: null,
   }));
   return [...implemented, ...planned];

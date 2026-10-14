@@ -216,7 +216,7 @@ async function finishConnection(p: { def: ConnectorDefinition; provider: string;
 
 const perUserKey = (r: Request) => r.user?.id ?? r.ip ?? "anon";
 
-const tokenBody = z.object({ input: z.record(z.string(), z.string().trim().max(500)).default({}) });
+const tokenBody = z.object({ input: z.record(z.string(), z.string().trim().max(2000)).default({}) });
 
 /** Connect with an access token the user created in the provider (no platform OAuth app needed). */
 connectionsRouter.post("/businesses/:businessId/connections/:provider/token", requireUser, rateLimit({ name: "token-connect", max: 10, windowMs: 60_000, key: perUserKey }), async (req, res) => {

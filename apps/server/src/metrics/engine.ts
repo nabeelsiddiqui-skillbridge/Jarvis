@@ -9,6 +9,7 @@ import {
   evalCalc,
   formatCalc,
   getMetric,
+  MANUAL_SOURCES,
   previousPeriod,
   previousYear,
   resolvePreset,
@@ -18,6 +19,7 @@ import {
   type DateRange,
   type DateRangeSpec,
   type MetricDef,
+  type ProviderId,
   type QueryResult,
   type SourceInfo,
   type WidgetQuery,
@@ -226,16 +228,48 @@ export async function runQuery(ctx: QueryContext, q: WidgetQuery): Promise<Query
   const today = todayIn(business.timezone);
   if (range.to >= today) limitations.push("Includes today, which is still in progress.");
 
-  // ---- choose a provider for every base metric (precedence; never summed across providers)
+  // ---- choose providers for every base metric: precedence, or a sum across platforms for combinable metrics
   const extraTargets = q.metrics.map((k) => targetFor(k, ctx.calcs)).filter((t): t is Target => Boolean(t));
   const allDeps = [...new Set([target, ...extraTargets].flatMap((t) => t.deps))];
-  const chosen = new Map<string, string>();
+  const chosen = new Map<string, string[]>();
   const missing: string[] = [];
+  const pname = (p: string) => PROVIDER_META[p]?.name ?? p;
+  const names = (ps: string[]) => ps.map(pname).join(", ");
   for (const dep of allDeps) {
+    const m = getMetric(dep) as BaseMetric | undefined;
     const options = (availability.providers.get(dep) ?? []).filter((p) => !q.sources.length || q.sources.includes(p.provider));
-    if (options[0]) chosen.set(dep, options[0].provider);
-    else missing.push(dep);
-    if (options.length > 1) limitations.push(`${getMetric(dep)?.label} is available from several sources; using ${PROVIDER_META[options[0]!.provider]?.name ?? options[0]!.provider} (not combined).`);
+    if (!options.length) {
+      missing.push(dep);
+      continue;
+    }
+    if (m?.combine === "sum") {
+      const platforms = options.filter((o) => !MANUAL_SOURCES.includes(o.provider as ProviderId));
+      chosen.set(dep, (platforms.length ? platforms : [options[0]!]).map((o) => o.provider));
+    } else {
+      chosen.set(dep, [options[0]!.provider]);
+      if (options.length > 1) limitations.push(`${m?.label} is available from several sources; using ${pname(options[0]!.provider)} (not combined).`);
+    }
+  }
+  // Inputs of one figure must come from the same platforms (e.g. profit = sales − costs only where costs exist).
+  const combinedDeps = target.deps.filter((d) => (getMetric(d) as BaseMetric | undefined)?.combine === "sum" && chosen.has(d));
+  if (combinedDeps.length > 1) {
+    const sets = combinedDeps.map((d) => chosen.get(d)!);
+    const common = sets[0]!.filter((p) => sets.every((s) => s.includes(p)));
+    if (common.length && sets.some((s) => s.length !== common.length)) {
+      const dropped = [...new Set(sets.flat())].filter((p) => !common.includes(p));
+      for (const d of combinedDeps) chosen.set(d, chosen.get(d)!.filter((p) => common.includes(p)));
+      limitations.push(`${target.label} uses ${names(common)} only; ${names(dropped)} ${dropped.length > 1 ? "don't" : "doesn't"} report every input it needs.`);
+    }
+  }
+  for (const dep of target.deps) {
+    const ps = chosen.get(dep);
+    if (!ps || ps.length < 2) continue;
+    const m = getMetric(dep) as BaseMetric;
+    limitations.push(`${m.label} combines ${names(ps)}.${m.combineNote ? ` ${m.combineNote}` : ""}`);
+    for (const p of ps) {
+      const span = availability.providers.get(dep)?.find((x) => x.provider === p);
+      if (span && span.minDate > range.from) limitations.push(`${pname(p)} ${m.label.toLowerCase()} starts ${span.minDate}; earlier days include the other platforms only.`);
+    }
   }
 
   const baseResult = (): QueryResult => ({
@@ -271,8 +305,9 @@ export async function runQuery(ctx: QueryContext, q: WidgetQuery): Promise<Query
 
   // ---- fetch daily totals for every chosen (metric, provider) across both ranges
   const spanFrom = cmpRange && cmpRange.from < range.from ? cmpRange.from : range.from;
-  const keys = [...chosen.keys()];
-  const provs = keys.map((k) => chosen.get(k)!);
+  const pairs = [...chosen.entries()].flatMap(([k, ps]) => ps.map((p) => [k, p] as const));
+  const keys = pairs.map((x) => x[0]);
+  const provs = pairs.map((x) => x[1]);
   const totalsSql = `
     SELECT f.metric_key, f.date::text AS date, sum(f.value)::float8 AS value, array_agg(DISTINCT f.currency) FILTER (WHERE f.currency IS NOT NULL) AS currencies,
            array_agg(DISTINCT f.connection_id) AS connections
@@ -288,7 +323,7 @@ export async function runQuery(ctx: QueryContext, q: WidgetQuery): Promise<Query
   const usedConnections = new Set<string>();
   for (const r of rows) {
     if (!daily.has(r.metric_key)) daily.set(r.metric_key, new Map());
-    daily.get(r.metric_key)!.set(r.date, r.value);
+    daily.get(r.metric_key)!.set(r.date, r.value); // summed across the chosen platforms
     const m = getMetric(r.metric_key);
     if (m?.unit === "currency") for (const c of r.currencies ?? []) currencies.add(c);
     for (const c of r.connections ?? []) usedConnections.add(c);
@@ -323,7 +358,7 @@ export async function runQuery(ctx: QueryContext, q: WidgetQuery): Promise<Query
   if (!daysIn.length) {
     result.availability = "unavailable";
     result.unavailableReason = `No data in ${range.from} – ${range.to}. Sources cover ${target.deps.map((k) => {
-      const p = availability.providers.get(k)?.find((x) => x.provider === chosen.get(k));
+      const p = availability.providers.get(k)?.find((x) => chosen.get(k)?.includes(x.provider));
       return p ? `${p.minDate} – ${p.maxDate}` : "nothing";
     })[0]}.`;
     return result;
@@ -412,7 +447,7 @@ async function breakdown(
   q: WidgetQuery,
   target: Target,
   extras: Target[],
-  chosen: Map<string, string>,
+  chosen: Map<string, string[]>,
   range: DateRange,
   daysIn: string[],
   limitations: string[],
@@ -422,23 +457,28 @@ async function breakdown(
     return [];
   }
   const deps = [...new Set([target, ...extras].flatMap((t) => t.deps))].filter((k) => chosen.has(k));
-  const keys = deps;
-  const provs = keys.map((k) => chosen.get(k)!);
+  const pairs = deps.flatMap((k) => chosen.get(k)!.map((p) => [k, p] as const));
+  // "platform" isn't stored as a dimension: it's the provider of each daily total.
+  const byPlatform = q.dimension === "platform";
+  const dimExpr = byPlatform ? "f.provider" : "f.dim_value";
   const filter = q.filters[0];
-  const params: unknown[] = [ctx.business.id, keys, provs, q.dimension, range.from, range.to];
+  const params: unknown[] = [ctx.business.id, pairs.map((x) => x[0]), pairs.map((x) => x[1]), byPlatform ? "" : q.dimension, range.from, range.to];
   let where = "";
   if (filter) {
-    params.push(filter.values);
-    where = filter.op === "in" ? `AND f.dim_value = ANY($${params.length}::text[])` : `AND NOT (f.dim_value = ANY($${params.length}::text[]))`;
+    // Platform filters may use provider ids or names.
+    const values = byPlatform ? filter.values.map((v) => Object.entries(PROVIDER_META).find(([id, m]) => id === v || m.name === v)?.[0] ?? v) : filter.values;
+    params.push(values);
+    where = filter.op === "in" ? `AND ${dimExpr} = ANY($${params.length}::text[])` : `AND NOT (${dimExpr} = ANY($${params.length}::text[]))`;
   }
-  const { rows } = await ctx.db.query(
-    `SELECT f.metric_key, f.dim_value, f.date::text AS date, sum(f.value)::float8 AS value
+  const { rows: raw } = await ctx.db.query(
+    `SELECT f.metric_key, ${dimExpr} AS dim_value, f.date::text AS date, sum(f.value)::float8 AS value
        FROM metric_facts f JOIN connection_assets a ON a.id = f.asset_id AND a.selected
        JOIN unnest($2::text[], $3::text[]) AS c(metric_key, provider) ON c.metric_key = f.metric_key AND c.provider = f.provider
       WHERE f.business_id = $1 AND f.dim_key = $4 AND f.date BETWEEN $5 AND $6 ${where}
-      GROUP BY f.metric_key, f.dim_value, f.date`,
+      GROUP BY f.metric_key, ${dimExpr}, f.date`,
     params,
   );
+  const rows = byPlatform ? raw.map((r) => ({ ...r, dim_value: PROVIDER_META[r.dim_value]?.name ?? r.dim_value })) : raw;
   // dim value → metric → date → value
   const byDim = new Map<string, Map<string, Map<string, number>>>();
   for (const r of rows) {

@@ -2,9 +2,19 @@ import { ArrowRight, BarChart3, Bot, Building2, CheckCircle2, FileText, Lightbul
 import { ButtonLink } from "@/components/ui/Button";
 import { JarvisCore } from "@/components/jarvis/JarvisCore";
 
-/** Live connectors (working integrations) and planned ones, labelled as such. Mirrors the server's connector catalog. */
-export const LIVE_CONNECTORS = ["Shopify", "Google Analytics 4", "Google Search Console", "Google Ads", "HubSpot"];
-export const PLANNED_CONNECTORS = ["Meta Ads", "Stripe", "Klaviyo", "Salesforce", "WooCommerce", "TikTok", "LinkedIn", "QuickBooks & Xero", "CSV & Google Sheets"];
+/** Working integrations by category. Mirrors the server's connector catalog. */
+export const CONNECTOR_GROUPS: [string, string[]][] = [
+  ["Commerce & payments", ["Shopify", "WooCommerce", "Stripe"]],
+  ["Advertising", ["Google Ads", "Meta Ads", "TikTok Ads", "LinkedIn Ads"]],
+  ["Website & search", ["Google Analytics 4", "Google Search Console"]],
+  ["Social", ["Facebook Pages", "Instagram"]],
+  ["Email marketing", ["Klaviyo", "Mailchimp", "Brevo"]],
+  ["CRM", ["HubSpot", "Salesforce", "GoHighLevel"]],
+  ["Support", ["Zendesk", "Intercom"]],
+  ["Accounting", ["QuickBooks Online", "Xero"]],
+  ["Your own data", ["Google Sheets", "CSV upload"]],
+];
+export const LIVE_CONNECTORS = CONNECTOR_GROUPS.flatMap(([, list]) => list);
 
 export function Home() {
   return (
@@ -47,7 +57,7 @@ export function Home() {
         <h2 id="how-h" className="text-center text-2xl font-semibold sm:text-3xl">From connected accounts to decisions</h2>
         <ol className="mt-10 grid gap-5 md:grid-cols-3">
           {[
-            { icon: Plug, title: "1. Connect", body: "Authorize Shopify, Google and HubSpot with the minimum read scopes, pick the exact store, property or account, and watch the first import progress." },
+            { icon: Plug, title: "1. Connect", body: "Sign in or paste a read-only API key for each platform, pick the exact store, property or account, and watch the first import progress." },
             { icon: Mic, title: "2. Ask", body: "“How did sales do last week, and why?” The assistant queries your normalized metrics and shows the evidence: source, period, comparison and freshness." },
             { icon: Lightbulb, title: "3. Act", body: "Daily briefings, alerts and insights surface what changed. Supported changes — like pausing a campaign — are proposed, approved and logged." },
           ].map((s) => (
@@ -102,15 +112,14 @@ export function Home() {
 
       <section className="mx-auto max-w-6xl px-5 pb-24" aria-labelledby="connectors-h">
         <h2 id="connectors-h" className="text-center text-2xl font-semibold sm:text-3xl">Integrations</h2>
-        <div className="mt-8 grid gap-5 md:grid-cols-2">
-          <div className="panel p-6">
-            <h3 className="font-semibold">Available now</h3>
-            <ul className="mt-3 flex flex-wrap gap-2">{LIVE_CONNECTORS.map((c) => <li key={c} className="rounded-full border border-success/30 bg-success/10 px-3 py-1 text-sm text-success">{c}</li>)}</ul>
-          </div>
-          <div className="panel p-6">
-            <h3 className="font-semibold">Planned <span className="text-sm font-normal text-muted">— not yet available</span></h3>
-            <ul className="mt-3 flex flex-wrap gap-2">{PLANNED_CONNECTORS.map((c) => <li key={c} className="rounded-full border border-line px-3 py-1 text-sm text-muted">{c}</li>)}</ul>
-          </div>
+        <p className="mx-auto mt-3 max-w-2xl text-center text-muted">{LIVE_CONNECTORS.length} working integrations. Figures from different platforms are added up only where they measure separate things — and every number says where it came from.</p>
+        <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          {CONNECTOR_GROUPS.map(([group, list]) => (
+            <div key={group} className="panel p-5">
+              <h3 className="hud-label text-[11px] text-subtle">{group}</h3>
+              <ul className="mt-3 flex flex-wrap gap-2">{list.map((c) => <li key={c} className="rounded-full border border-success/30 bg-success/10 px-3 py-1 text-sm text-success">{c}</li>)}</ul>
+            </div>
+          ))}
         </div>
         <div className="mt-12 text-center">
           <ButtonLink to="/signup" variant="primary" size="lg">Start a 14-day trial <ArrowRight className="size-4" /></ButtonLink>

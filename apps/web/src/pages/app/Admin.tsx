@@ -492,7 +492,13 @@ interface Setting { key: string; label: string; group: string; secret: boolean; 
 
 const GROUP_URLS: Record<string, (c: any) => string[]> = {
   Shopify: (c) => c.connectors.filter((x: any) => x.id === "shopify").flatMap((x: any) => [`Redirect URL: ${x.redirectUri}`, `Webhooks: ${x.webhookUrl}`]),
-  "Google (GA4, Search Console, Ads)": (c) => c.connectors.filter((x: any) => ["ga4", "gsc", "google_ads"].includes(x.id)).map((x: any) => `Authorized redirect URI: ${x.redirectUri}`),
+  "Google (GA4, Search Console, Ads, Sheets)": (c) => c.connectors.filter((x: any) => ["ga4", "gsc", "google_ads", "google_sheets"].includes(x.id)).map((x: any) => `Authorized redirect URI: ${x.redirectUri}`),
+  "Meta (Ads, Pages, Instagram)": (c) => [...new Set<string>(c.connectors.filter((x: any) => ["meta_ads", "facebook_pages", "instagram"].includes(x.id)).map((x: any) => `Valid OAuth redirect URI: ${x.redirectUri}`))],
+  "TikTok Ads": (c) => c.connectors.filter((x: any) => x.id === "tiktok_ads").map((x: any) => `Advertiser redirect URL: ${x.redirectUri}`),
+  "LinkedIn Ads": (c) => c.connectors.filter((x: any) => x.id === "linkedin_ads").map((x: any) => `Authorized redirect URL: ${x.redirectUri}`),
+  Salesforce: (c) => c.connectors.filter((x: any) => x.id === "salesforce").map((x: any) => `Callback URL: ${x.redirectUri}`),
+  "QuickBooks Online": (c) => c.connectors.filter((x: any) => x.id === "quickbooks").map((x: any) => `Redirect URI: ${x.redirectUri}`),
+  Xero: (c) => c.connectors.filter((x: any) => x.id === "xero").map((x: any) => `Redirect URI: ${x.redirectUri}`),
   HubSpot: (c) => c.connectors.filter((x: any) => x.id === "hubspot").flatMap((x: any) => [`Redirect URL: ${x.redirectUri}`, `Webhooks: ${x.webhookUrl}`]),
   "Billing (Stripe)": (c) => [`Webhook endpoint: ${c.billing.webhookUrl}`],
 };
