@@ -13,7 +13,8 @@ import type { ConnectorDefinition, Credentials, SyncContext, SyncResult, Verifie
  * (access token ≈1h + rotating refresh token), callback HMAC + state verified.
  * Data: GraphQL Admin API, cursor pagination, cost-based throttling.
  * Sync: initial import → incremental by updated_at (with overlap) → nightly
- * reconciliation of recent days. Webhooks: orders/create|updated|cancelled,
+ * reconciliation of recent days; each sync also records a stock snapshot for today
+ * (tracked variants). Webhooks: orders/create|updated|cancelled,
  * refunds/create, app/uninstalled (+ mandatory compliance topics), verified by
  * base64 HMAC and de-duplicated by X-Shopify-Webhook-Id.
  */
@@ -271,11 +272,59 @@ async function syncShop(ctx: SyncContext): Promise<SyncResult> {
   if (ctx.mode === "reconcile") for (const d of datesBetween(addDays(today, -ZERO_SAFE_RECONCILE_DAYS), today)) affected.add(d);
   const dates = [...new Set([...affected, ...fill])].filter((d) => d >= coveredFrom && d <= today).sort();
   const recomputed = await replaceFacts(ctx, dates, (d) => computeDay(ctx, d, fullHistory), OWNED);
+  await inventorySnapshot(ctx, shop, creds.access_token, today, notes);
   await updateAssetCursor(ctx.db, ctx.asset.id, { coveredFrom, coveredTo: today, lastUpdatedAt: startedAt.toISOString() }, today);
   return { records: count, datesRecomputed: recomputed, coveredFrom, coveredTo: today, notes };
 }
 
 const ZERO_SAFE_RECONCILE_DAYS = 14;
+
+// ------------------------------------------------------------------ inventory snapshot
+
+/** Stock metrics, written for "today" only with their own owned list (order recomputes never touch them). */
+const INVENTORY = ["inv_units_on_hand", "inv_out_of_stock"];
+
+/**
+ * Current stock across tracked variants: units on hand (negative stock counts as 0, by product)
+ * and variants out of stock (quantity ≤ 0). Shopify has no per-item low-stock threshold, so
+ * inv_low_stock isn't reported.
+ */
+async function inventorySnapshot(ctx: SyncContext, shop: string, token: string, today: string, notes: string[]) {
+  const units = new Map<string, number>();
+  let total = 0, out = 0, tracked = 0;
+  let after: string | null = null;
+  try {
+    for (;;) {
+      const data: any = await gql(shop, token,
+        `query($first: Int!, $after: String) { productVariants(first: $first, after: $after) { pageInfo { hasNextPage endCursor } nodes { id title displayName inventoryQuantity inventoryItem { tracked } product { title } } } }`,
+        { first: 250, after });
+      for (const v of data.productVariants?.nodes ?? []) {
+        if (!v.inventoryItem?.tracked) continue;
+        tracked++;
+        const q = num(v.inventoryQuantity);
+        const name = v.product?.title ?? v.displayName ?? v.title;
+        units.set(name, (units.get(name) ?? 0) + Math.max(0, q));
+        total += Math.max(0, q);
+        if (q <= 0) out++;
+      }
+      if (!data.productVariants?.pageInfo?.hasNextPage) break;
+      after = data.productVariants.pageInfo.endCursor;
+    }
+  } catch (e) {
+    if (e instanceof ProviderError && e.kind === "scope") {
+      notes.push("Stock levels couldn't be read: the app needs the read_products and read_inventory scopes.");
+      return;
+    }
+    throw e;
+  }
+  const facts: FactInput[] = [
+    { metric: "inv_units_on_hand", value: total },
+    { metric: "inv_out_of_stock", value: out },
+    ...[...units].map(([product, v]) => ({ metric: "inv_units_on_hand", dimKey: "product", dimValue: product, value: v })),
+  ];
+  if (!tracked) notes.push("No products in this store track inventory, so stock levels are zero.");
+  await replaceFacts(ctx, [today], () => facts, INVENTORY);
+}
 
 // ------------------------------------------------------------------ webhooks
 
@@ -351,10 +400,10 @@ export const shopify: ConnectorDefinition = {
   scopes: [
     { scope: "read_orders", reason: "Orders, totals, refunds and line items" },
     { scope: "read_products", reason: "Product names for product breakdowns" },
-    { scope: "read_inventory", reason: "Product unit costs for gross profit" },
+    { scope: "read_inventory", reason: "Product unit costs for gross profit, and stock levels" },
     { scope: "read_all_orders", reason: "Order history beyond 60 days (needs Shopify approval)", optional: true },
   ],
-  metrics: OWNED,
+  metrics: [...OWNED, ...INVENTORY],
   actions: [],
   supportsWebhooks: true,
   reportingDelay: "Orders appear within minutes",

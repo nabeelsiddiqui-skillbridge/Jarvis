@@ -12,8 +12,21 @@ import { createHmac, randomBytes } from "node:crypto";
 export interface MockLine { title: string; quantity: number; currentQuantity: number; price: number; discount: number; unitCost: number | null }
 export interface MockOrder { id: string; createdAt: string; updatedAt: string; test: boolean; cancelledAt: string | null; customerId: string | null; country: string; subtotal: number; currentSubtotal: number; lines: MockLine[] }
 
+/** A product variant's stock (for the inventory snapshot). */
+export interface MockVariant { id: string; product: string; title: string; quantity: number; tracked: boolean }
+
+export const makeVariants = (): MockVariant[] => [
+  { id: "gid://shopify/ProductVariant/1", product: "Rain Jacket", title: "S", quantity: 12, tracked: true },
+  { id: "gid://shopify/ProductVariant/2", product: "Rain Jacket", title: "M", quantity: 0, tracked: true },
+  { id: "gid://shopify/ProductVariant/3", product: "Daypack", title: "Default Title", quantity: 30, tracked: true },
+  { id: "gid://shopify/ProductVariant/4", product: "Socks", title: "Default Title", quantity: -2, tracked: true },
+  { id: "gid://shopify/ProductVariant/5", product: "Gift Card", title: "Default Title", quantity: 0, tracked: false },
+  { id: "gid://shopify/ProductVariant/6", product: "Boots", title: "42", quantity: 7, tracked: true },
+];
+
 export interface MockState {
   orders: MockOrder[];
+  variants: MockVariant[];
   tokens: Set<string>;
   refreshTokens: Set<string>;
   calls: { refresh: number; graphql: number; revoke: number; webhooksCreated: string[] };
@@ -78,7 +91,7 @@ function toNode(o: MockOrder) {
 }
 
 export function startMockShopify(): Promise<{ url: string; state: MockState; close: () => Promise<void> }> {
-  const state: MockState = { orders: makeOrders(), tokens: new Set(), refreshTokens: new Set(), calls: { refresh: 0, graphql: 0, revoke: 0, webhooksCreated: [] }, fail: { nextGraphql503: 0, nextGraphql401: 0, throttleOnce: false } };
+  const state: MockState = { orders: makeOrders(), variants: makeVariants(), tokens: new Set(), refreshTokens: new Set(), calls: { refresh: 0, graphql: 0, revoke: 0, webhooksCreated: [] }, fail: { nextGraphql503: 0, nextGraphql401: 0, throttleOnce: false } };
   const app = express();
   app.use(express.json());
   app.use(express.urlencoded({ extended: false }));
@@ -128,6 +141,14 @@ export function startMockShopify(): Promise<{ url: string; state: MockState; clo
     if (q.includes("order(id:")) {
       const o = state.orders.find((x) => x.id === v.id);
       return res.json({ data: { order: o ? toNode(o) : null }, extensions: ext });
+    }
+    if (q.includes("productVariants(")) {
+      const start = v.after ? Number(v.after) : 0;
+      const first = Math.min(250, v.first ?? 50);
+      const page = state.variants.slice(start, start + Math.min(first, 4)); // small pages to exercise pagination
+      return res.json({ data: { productVariants: { pageInfo: { hasNextPage: start + page.length < state.variants.length, endCursor: String(start + page.length) }, nodes: page.map((x) => ({
+        id: x.id, title: x.title, displayName: `${x.product} - ${x.title}`, inventoryQuantity: x.quantity, inventoryItem: { tracked: x.tracked }, product: { title: x.product },
+      })) } }, extensions: ext });
     }
     if (q.includes("orders(")) {
       const search: string = v.query ?? "";

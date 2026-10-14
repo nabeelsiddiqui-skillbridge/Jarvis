@@ -235,7 +235,9 @@ describe("connector catalog", () => {
     const { businessId } = await workspaceWithBusiness(owner, "Catalog Co");
     const cat = (await owner.get(`/api/businesses/${businessId}/connectors`)).body;
     expect(cat.find((c: any) => c.id === "shopify").status).toBe("available");
-    expect(cat.find((c: any) => c.id === "meta_ads").status).toBe("planned");
+    // API-key connectors need no platform credentials; planned entries are never shown as connectable.
+    expect(cat.find((c: any) => c.id === "stripe")).toMatchObject({ status: "available", oauth: false });
+    for (const c of cat.filter((x: any) => x.status === "planned")) expect(c.tokenConnect).toBeNull();
     delete process.env.SHOPIFY_API_SECRET;
     const cat2 = (await owner.get(`/api/businesses/${businessId}/connectors`)).body;
     expect(cat2.find((c: any) => c.id === "shopify")).toMatchObject({ status: "config_required", missingConfig: ["SHOPIFY_API_SECRET"] });
