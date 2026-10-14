@@ -204,7 +204,9 @@ describe("platform administration", () => {
     const usage = (await admin.get("/api/admin/usage?days=7")).body;
     expect(usage.byWorkspace.find((w: any) => w.id === ws)).toMatchObject({ ai_messages: 1, input_tokens: 1200 });
     const conn = (await admin.get("/api/admin/connectors")).body;
-    expect(conn.providers.map((p: any) => p.id)).toEqual(["shopify", "ga4", "gsc", "google_ads", "hubspot"]);
+    const { IMPLEMENTED } = await import("../src/connectors/registry.js");
+    expect(conn.providers.map((p: any) => p.id)).toEqual(IMPLEMENTED.map((d) => d.id));
+    expect(conn.providers.length).toBe(23);
     await pool.query(`INSERT INTO jobs (type, workspace_id, status, last_error, finished_at) VALUES ('report.generate', $1, 'failed', 'boom', now())`, [ws]);
     const jobs = (await admin.get("/api/admin/jobs?status=failed")).body;
     const failed = jobs.jobs.find((j: any) => j.last_error === "boom");

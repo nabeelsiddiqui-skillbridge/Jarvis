@@ -547,3 +547,43 @@ Status of each stage of the build plan: what works, what is simulated, and what 
 | No secrets appear in browser code or logs | Secrets read only in `config.ts` and the server modules; short-lived voice tokens only; config status shows presence only (tested); bundle and log scan above |
 
 **Needs live credentials to finish verification**: Shopify, Google (GA4/Search Console/Ads), HubSpot, Anthropic, Deepgram and Stripe were exercised against faithful local stand-ins. Each one needs a final check with real accounts (see each stage's *External setup*).
+
+---
+
+## Expansion: all platforms, connected from the browser
+
+**Connectors (23 working):** Shopify, WooCommerce, Stripe · Google Ads, Meta Ads, TikTok Ads, LinkedIn Ads · GA4, Search Console · Facebook Pages, Instagram · Klaviyo, Mailchimp, Brevo · HubSpot, Salesforce, GoHighLevel · Zendesk, Intercom · QuickBooks Online, Xero · Google Sheets, CSV upload. Nothing remains "planned".
+
+**Every credential is entered in the front end**
+- API keys and access tokens (Stripe, WooCommerce, Klaviyo, Mailchimp, Brevo, GoHighLevel, Zendesk, Intercom, Meta, TikTok, LinkedIn, Shopify, HubSpot, Salesforce client credentials, Xero custom connection, Google Sheets published link) are entered on **Connections**. They are verified with the provider and stored encrypted.
+- Platform OAuth app credentials (Meta, TikTok, LinkedIn, Salesforce, QuickBooks, Xero, Google, Shopify, HubSpot) are entered under **Platform admin → Credentials**, which also shows the redirect URL to register.
+- CSV files are uploaded from the browser, with a downloadable template.
+
+**Combining across platforms**
+- Metrics marked `combine: "sum"` add up across the platforms that measure separate things: ads, stores, CRM, email, social, support, payments and books.
+- CSV and Google Sheets are used only when no platform supplies a metric.
+- Derived metrics use only the platforms that report all of their inputs, and say so: for example, ROAS excludes TikTok, which has no conversion value; gross profit uses only stores with product costs.
+- Any combined metric can be broken down by **Platform**.
+- Snapshot metrics take each account's latest value before summing.
+
+**New metric families:** payments and subscriptions (MRR, active subscriptions), email, social, support (first reply time, CSAT, backlog), accounting (books revenue and profit), inventory (units in stock, out of stock, low stock).
+
+**Simulated:** every new connector was tested against local stand-ins (183 server tests). Endpoint and field details that couldn't be confirmed without live accounts are kept in constants in each connector. The main ones:
+- Meta Page Insights metric names, which Meta keeps deprecating;
+- TikTok report metrics and error codes;
+- the LinkedIn API version;
+- Xero granular scopes and Journals access tiers;
+- the QuickBooks daily P&L JSON shape;
+- Klaviyo revision and grouping;
+- GoHighLevel search body shapes.
+
+**External setup needed for one-click sign-in**
+- **Meta:** an app with ads_read, pages_read_engagement, read_insights and instagram_manage_insights, plus App Review.
+- **TikTok:** a Marketing API app.
+- **LinkedIn:** Advertising API access.
+- **Salesforce:** a connected app.
+- **Intuit:** production keys.
+- **Xero:** an app.
+- **Google:** add the Sheets scope to the OAuth consent screen.
+
+Token connections work without any of these.
