@@ -14,7 +14,7 @@ const TZ = "America/New_York";
 const to = addDays(todayIn(TZ), -1);
 const from = addDays(to, -9);
 
-async function source(provider: string, facts: Record<string, number>, opts: { days?: number; dims?: Record<string, Record<string, number>> } = {}) {
+async function source(provider: string, facts: Record<string, number>, opts: { days?: number; offset?: number } = {}) {
   const c = await pool.query(
     `INSERT INTO connections (workspace_id, business_id, provider, display_name, status) VALUES ($1, $2, $3, $4, 'active') RETURNING id`,
     [workspaceId, businessId, provider, `${provider} account`],
@@ -26,7 +26,7 @@ async function source(provider: string, facts: Record<string, number>, opts: { d
   );
   const days = opts.days ?? 10;
   for (let i = 0; i < days; i++) {
-    const date = addDays(to, -i);
+    const date = addDays(to, -i - (opts.offset ?? 0));
     for (const [m, v] of Object.entries(facts)) {
       await pool.query(
         `INSERT INTO metric_facts (workspace_id, business_id, connection_id, asset_id, provider, metric_key, date, dim_key, dim_value, value, currency)
@@ -47,6 +47,9 @@ beforeAll(async () => {
   await source("csv", { ad_spend: 999, store_net_sales: 1000 });
   await source("shopify", { store_net_sales: 500, store_cogs: 200 });
   await source("woocommerce", { store_net_sales: 300 });
+  // Snapshots recorded on different "today"s (accounts in different timezones).
+  await source("mailchimp", { email_list_size: 1000 }, { days: 3 });
+  await source("brevo", { email_list_size: 250 }, { days: 3, offset: 1 });
 });
 
 describe("combining metrics across platforms", () => {
@@ -86,5 +89,10 @@ describe("combining metrics across platforms", () => {
     // MER mixes families (store sales ÷ ad spend): each side combines independently.
     const mer = await metric(owner, businessId, { metric: "mer", dateRange: { from, to } });
     expect(mer.total).toBeCloseTo(8000 / 1640, 6);
+  });
+
+  it("adds up each account's latest snapshot, even when they're on different days", async () => {
+    const r = await metric(owner, businessId, { metric: "email_list_size", dateRange: { from, to } });
+    expect(r.total).toBe(1250);
   });
 });

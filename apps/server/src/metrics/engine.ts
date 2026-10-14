@@ -309,21 +309,31 @@ export async function runQuery(ctx: QueryContext, q: WidgetQuery): Promise<Query
   const keys = pairs.map((x) => x[0]);
   const provs = pairs.map((x) => x[1]);
   const totalsSql = `
-    SELECT f.metric_key, f.date::text AS date, sum(f.value)::float8 AS value, array_agg(DISTINCT f.currency) FILTER (WHERE f.currency IS NOT NULL) AS currencies,
+    SELECT f.metric_key, f.asset_id, f.date::text AS date, sum(f.value)::float8 AS value, array_agg(DISTINCT f.currency) FILTER (WHERE f.currency IS NOT NULL) AS currencies,
            array_agg(DISTINCT f.connection_id) AS connections
       FROM metric_facts f JOIN connection_assets a ON a.id = f.asset_id AND a.selected
       JOIN unnest($2::text[], $3::text[]) AS c(metric_key, provider) ON c.metric_key = f.metric_key AND c.provider = f.provider
      WHERE f.business_id = $1 AND f.dim_key = '' AND f.date BETWEEN $4 AND $5
-     GROUP BY f.metric_key, f.date`;
+     GROUP BY f.metric_key, f.asset_id, f.date`;
   const { rows } = await db.query(totalsSql, [business.id, keys, provs, spanFrom, range.to]);
 
-  // metric → date → value
+  // metric → date → value (summed across the chosen platforms' accounts)
   const daily = new Map<string, Map<string, number>>();
+  // Snapshots per account: accounts record "today" in their own timezones, so each one's
+  // latest snapshot is taken separately before adding them up.
+  const snapshots = new Map<string, Map<string, Map<string, number>>>(); // metric → asset → date → value
   const currencies = new Set<string>();
   const usedConnections = new Set<string>();
   for (const r of rows) {
     if (!daily.has(r.metric_key)) daily.set(r.metric_key, new Map());
-    daily.get(r.metric_key)!.set(r.date, r.value); // summed across the chosen platforms
+    const d = daily.get(r.metric_key)!;
+    d.set(r.date, (d.get(r.date) ?? 0) + r.value);
+    if ((getMetric(r.metric_key) as BaseMetric | undefined)?.aggregation === "snapshot") {
+      if (!snapshots.has(r.metric_key)) snapshots.set(r.metric_key, new Map());
+      const byAsset = snapshots.get(r.metric_key)!;
+      if (!byAsset.has(r.asset_id)) byAsset.set(r.asset_id, new Map());
+      byAsset.get(r.asset_id)!.set(r.date, r.value);
+    }
     const m = getMetric(r.metric_key);
     if (m?.unit === "currency") for (const c of r.currencies ?? []) currencies.add(c);
     for (const c of r.connections ?? []) usedConnections.add(c);
@@ -381,8 +391,13 @@ export async function runQuery(ctx: QueryContext, q: WidgetQuery): Promise<Query
         continue;
       }
       if (m.aggregation === "snapshot") {
-        const last = [...days].reverse().find((d) => map.has(d));
-        out[k] = last ? map.get(last)! : null;
+        // Latest value per account within these days, then summed.
+        let total: number | null = null;
+        for (const series of snapshots.get(k)?.values() ?? []) {
+          const last = [...days].reverse().find((d) => series.has(d));
+          if (last) total = (total ?? 0) + series.get(last)!;
+        }
+        out[k] = total;
       } else out[k] = days.reduce((s, d) => s + (map.get(d) ?? 0), 0);
     }
     return out;
