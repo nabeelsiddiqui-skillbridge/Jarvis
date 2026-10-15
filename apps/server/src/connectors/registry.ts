@@ -1,4 +1,6 @@
 import type { CatalogStatus, ConnectorDefinition } from "./types.js";
+import { config } from "../config.js";
+import { guideFor, type ConnectorGuide } from "./guides.js";
 import { shopify } from "./shopify/index.js";
 import { ga4 } from "./google/ga4.js";
 import { gsc } from "./google/gsc.js";
@@ -94,8 +96,15 @@ export interface CatalogEntry {
   /** Has a provider sign-in (OAuth) flow. */
   oauth: boolean;
   /** Connect with an access token instead of OAuth (works without platform app credentials). */
-  tokenConnect: { fields: NonNullable<ConnectorDefinition["tokenConnect"]>["fields"]; instructions: string[] } | null;
+  tokenConnect: { fields: NonNullable<ConnectorDefinition["tokenConnect"]>["fields"]; instructions: string[]; variants: NonNullable<ConnectorDefinition["tokenConnect"]>["variants"] | null } | null;
+  /** How to connect, step by step (overview, prerequisites, sign-in, admin setup, troubleshooting). */
+  guide: ConnectorGuide | null;
+  /** The OAuth callback to register with the provider. */
+  redirectUri: string | null;
+  docsUrl: string | null;
 }
+
+export const redirectUriFor = (id: string) => `${config.apiUrl}/api/oauth/${id}/callback`;
 
 export function catalog(): CatalogEntry[] {
   const implemented = IMPLEMENTED.map((d): CatalogEntry => {
@@ -108,7 +117,7 @@ export function catalog(): CatalogEntry[] {
       status,
       statusNote:
         status === "available" ? (d.authorizeUrl || !d.tokenConnect ? "Ready to connect." : "Connect with an API key or token from your account.")
-        : status === "config_required" ? (d.tokenConnect ? "Connect with an access token from your account, or a platform administrator can add app credentials for one-click sign-in." : "A platform administrator must add this provider's app credentials (Admin → Credentials) before it can be connected.")
+        : status === "config_required" ? (d.tokenConnect ? "Ready to connect with a key or token from your account. One-click sign-in appears once a platform administrator adds the app credentials." : "A platform administrator must add this provider's app credentials (Admin → Credentials) before it can be connected.")
         : "Waiting for the provider to approve access for this platform.",
       missingConfig,
       accessRequirements: d.accessRequirements ?? [],
@@ -119,7 +128,10 @@ export function catalog(): CatalogEntry[] {
       connectFields: d.connectFields,
       supportsWebhooks: d.supportsWebhooks,
       oauth: Boolean(d.authorizeUrl),
-      tokenConnect: d.tokenConnect ? { fields: d.tokenConnect.fields, instructions: d.tokenConnect.instructions } : null,
+      tokenConnect: d.tokenConnect ? { fields: d.tokenConnect.fields, instructions: d.tokenConnect.instructions, variants: d.tokenConnect.variants ?? null } : null,
+      guide: guideFor(d.id, redirectUriFor(d.id)),
+      redirectUri: d.authorizeUrl ? redirectUriFor(d.id) : null,
+      docsUrl: d.docsUrl ?? null,
     };
   });
   const planned = PLANNED.filter((p) => !IMPLEMENTED.some((d) => d.id === p.id)).map((p): CatalogEntry => ({
@@ -139,6 +151,9 @@ export function catalog(): CatalogEntry[] {
     supportsWebhooks: false,
     oauth: false,
     tokenConnect: null,
+    guide: null,
+    redirectUri: null,
+    docsUrl: null,
   }));
   return [...implemented, ...planned];
 }

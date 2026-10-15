@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, Clock, Download, ExternalLink, FileUp, History, KeyRound, Loader2, Plug, RefreshCw, Settings2, ShieldCheck, Unplug, Upload, XCircle } from "lucide-react";
+import { AlertTriangle, BookOpen, CheckCircle2, Clock, Download, ExternalLink, FileUp, History, KeyRound, Loader2, Plug, RefreshCw, Settings2, ShieldCheck, Unplug, Upload, XCircle } from "lucide-react";
 import { can } from "@bca/shared";
 import { del, get, post, put, errorMessage } from "@/lib/api";
 import { useBusiness } from "@/lib/business";
@@ -11,7 +11,8 @@ import { Button } from "@/components/ui/Button";
 import { PageHeader } from "@/components/ui/Card";
 import { Dialog } from "@/components/ui/Dialog";
 import { EmptyState, ErrorState, Prerequisite } from "@/components/ui/EmptyState";
-import { Field, Input } from "@/components/ui/Field";
+import { Field, Input, Textarea } from "@/components/ui/Field";
+import { useMe } from "@/lib/session";
 import { Skeleton } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
 import { relativeTime } from "@/components/widgets/WidgetFrame";
@@ -28,7 +29,15 @@ interface CatalogEntry {
   /** Has a provider sign-in flow. */
   oauth: boolean;
   /** Connect by pasting an access token created in the provider (works without platform OAuth credentials). */
-  tokenConnect: { fields: { key: string; label: string; placeholder?: string; help?: string; secret?: boolean; optional?: boolean }[]; instructions: string[] } | null;
+  tokenConnect: {
+    fields: { key: string; label: string; placeholder?: string; help?: string; secret?: boolean; optional?: boolean; multiline?: boolean }[];
+    instructions: string[];
+    /** Alternative ways to connect (e.g. service-account key or your own OAuth client). */
+    variants: { id: string; label: string; fields: { key: string; label: string; placeholder?: string; help?: string; secret?: boolean; optional?: boolean; multiline?: boolean }[]; instructions: string[] }[] | null;
+  } | null;
+  guide: { summary: string; needs: string[]; signIn?: string[]; adminSetup?: string[]; troubleshooting?: string[]; links?: { label: string; url: string }[] } | null;
+  redirectUri: string | null;
+  docsUrl: string | null;
 }
 
 /** Display order of catalog categories. */
@@ -73,6 +82,7 @@ export function Connections() {
     refetchInterval: (q) => (q.state.data?.some((c) => c.status === "syncing" || c.latestJob?.status === "running" || c.latestJob?.status === "queued") ? 4000 : false),
   });
   const [connecting, setConnecting] = useState<CatalogEntry | null>(null);
+  const [guideFor, setGuideFor] = useState<CatalogEntry | null>(null);
   const [assetsFor, setAssetsFor] = useState<Connection | null>(null);
   const oauthError = params.get("oauth_error");
 
@@ -161,9 +171,12 @@ export function Connections() {
                   <p className="text-sm text-muted">{e.description}</p>
                   <p className="text-xs text-subtle">{e.statusNote}</p>
                   {e.status !== "planned" && (
-                    <Button size="sm" variant={connectable(e) ? "primary" : "secondary"} className="mt-auto self-start" disabled={!manage || b.isDemo} onClick={() => openEntry(e)}>
-                      {isUpload(e) ? "Upload CSV" : connectable(e) ? "Connect" : "Details"}
-                    </Button>
+                    <div className="mt-auto flex flex-wrap items-center gap-2">
+                      <Button size="sm" variant={connectable(e) ? "primary" : "secondary"} disabled={!manage || b.isDemo} onClick={() => openEntry(e)}>
+                        {isUpload(e) ? "Upload CSV" : connectable(e) ? "Connect" : "Details"}
+                      </Button>
+                      {e.guide && !isUpload(e) && <Button size="sm" variant="ghost" icon={<BookOpen className="size-4" />} onClick={() => setGuideFor(e)}>How to connect</Button>}
+                    </div>
                   )}
                 </li>
               ))}
@@ -180,6 +193,7 @@ export function Connections() {
           toast("Connected — choose what to sync");
           if (c?.status === "selecting_assets") setAssetsFor(c);
         }} />
+      <ConnectDialog entry={guideFor} readOnly onClose={() => setGuideFor(null)} onConnected={() => setGuideFor(null)} />
       <CsvUploadDialog open={Boolean(uploading)} connectionId={uploading?.connectionId} onClose={() => setUploading(null)} onDone={() => { setUploading(null); qc.invalidateQueries({ queryKey: ["b", b.id] }); }} />
       <AssetsDialog connection={assetsFor} onClose={() => setAssetsFor(null)} onSaved={() => { setAssetsFor(null); qc.invalidateQueries({ queryKey: connectionsKey(b.id) }); toast("Import started — data appears as it arrives."); }} />
     </>
@@ -280,21 +294,58 @@ function ConnectionCard({ c, manage, onChooseAssets, onReconnect, onUpload }: { 
   );
 }
 
-function ConnectDialog({ entry, onClose, reconnectId, onConnected }: { entry: CatalogEntry | null; onClose: () => void; reconnectId?: string; onConnected: (connectionId: string) => void }) {
+type TokenField = NonNullable<CatalogEntry["tokenConnect"]>["fields"][number];
+
+/** Numbered steps. */
+function Steps({ steps }: { steps: string[] }) {
+  return (
+    <ol className="space-y-2">
+      {steps.map((t, i) => (
+        <li key={t} className="flex gap-3">
+          <span className="grid size-5 shrink-0 place-items-center rounded-full border border-accent/50 font-mono text-[10.5px] text-accent">{i + 1}</span>
+          <span className="text-muted">{t}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function GuideSection({ title, children, open = false }: { title: string; children: React.ReactNode; open?: boolean }) {
+  return (
+    <details open={open} className="group rounded-[4px] border border-line bg-panel-2/40 px-3 py-2">
+      <summary className="cursor-pointer select-none font-medium marker:text-subtle">{title}</summary>
+      <div className="mt-3 space-y-2 pb-1">{children}</div>
+    </details>
+  );
+}
+
+function ConnectDialog({ entry, onClose, reconnectId, onConnected, readOnly }: { entry: CatalogEntry | null; onClose: () => void; reconnectId?: string; onConnected: (connectionId: string) => void; readOnly?: boolean }) {
   const b = useBusiness();
+  const me = useMe();
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const oauthReady = entry?.status === "available" && entry.oauth;
   const [method, setMethod] = useState<"oauth" | "token">("oauth");
-  useEffect(() => { setValues({}); setError(null); setMethod(entry && !oauthReady && entry.tokenConnect ? "token" : "oauth"); }, [entry?.id, oauthReady]);
+  const [variant, setVariant] = useState<string | null>(null);
+  useEffect(() => {
+    setValues({}); setError(null);
+    setMethod(entry && !oauthReady && entry.tokenConnect ? "token" : "oauth");
+    setVariant(entry?.tokenConnect?.variants?.[0]?.id ?? null);
+  }, [entry?.id, oauthReady]);
   if (!entry) return null;
+  const token = entry.tokenConnect;
+  const v = token?.variants?.find((x) => x.id === variant) ?? null;
+  const fields: TokenField[] = v?.fields ?? token?.fields ?? [];
+  const steps = v?.instructions ?? token?.instructions ?? [];
+  const guide = entry.guide;
   const go = async () => {
     setBusy(true);
     setError(null);
     try {
       if (method === "token") {
-        const r = await post<{ connectionId: string }>(`/businesses/${b.id}/connections/${entry.id}/token`, { input: values });
+        const input = Object.fromEntries(fields.map((f) => [f.key, values[f.key] ?? ""]).filter(([, x]) => x !== ""));
+        const r = await post<{ connectionId: string }>(`/businesses/${b.id}/connections/${entry.id}/token`, { input: v ? { ...input, _method: v.id } : input });
         setBusy(false);
         onConnected(r.connectionId);
         return;
@@ -306,40 +357,80 @@ function ConnectDialog({ entry, onClose, reconnectId, onConnected }: { entry: Ca
       setBusy(false);
     }
   };
-  const token = entry.tokenConnect;
-  const canSubmit = method === "token" ? Boolean(token?.fields.every((f) => f.optional || values[f.key]?.trim())) : oauthReady;
+  const canSubmit = method === "token" ? fields.every((f) => f.optional || values[f.key]?.trim()) : oauthReady;
+  const showSubmit = !readOnly && (method === "token" ? Boolean(token) : oauthReady);
+  const setField = (k: string, x: string) => setValues({ ...values, [k]: x });
   return (
-    <Dialog open onClose={onClose} title={`${reconnectId ? "Reconnect" : "Connect"} ${entry.name}`} size="lg"
-      footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button>{(method === "token" ? Boolean(token) : oauthReady) && (
+    <Dialog open onClose={onClose} title={`${readOnly ? "How to connect" : reconnectId ? "Reconnect" : "Connect"} ${entry.name}`} size="lg"
+      footer={<><Button variant="ghost" onClick={onClose}>{readOnly ? "Close" : "Cancel"}</Button>{showSubmit && (
         <Button variant="primary" loading={busy} disabled={!canSubmit} onClick={go} icon={method === "token" ? <KeyRound className="size-4" /> : <ExternalLink className="size-4" />}>{method === "token" ? "Connect" : `Continue to ${entry.name}`}</Button>
       )}</>}>
       <div className="space-y-5 text-sm">
         <p className="text-muted">{entry.description}</p>
+        {guide && <p className="rounded-[4px] border border-accent/30 bg-accent/5 px-3 py-2 text-fg">{guide.summary}</p>}
         {token && entry.oauth && (
-          <Tabs value={method} onChange={(v) => { setMethod(v); setError(null); }} items={[{ value: "oauth", label: `Sign in with ${entry.name}` }, { value: "token", label: "Use an access token" }]} />
+          <Tabs value={method} onChange={(x) => { setMethod(x); setError(null); }} items={[{ value: "token", label: "Connect with a key / token" }, { value: "oauth", label: `Sign in with ${entry.name}` }]} />
         )}
+
         {method === "oauth" && (
           <>
             {entry.status === "config_required" && (
               <Prerequisite tone="warning" title="One-click sign-in isn't set up yet">
-                A platform administrator can add the {entry.name} app credentials in <b>Platform admin → Credentials</b> (<code className="text-fg">{entry.missingConfig.join(", ")}</code>).{token ? " Meanwhile you can connect with an access token." : ""}
+                A platform administrator adds the {entry.name} app credentials once in <b>Platform admin → Credentials</b> (<code className="text-fg">{entry.missingConfig.join(", ")}</code>) — the steps are under “Enable one-click sign-in” below.{token ? " Meanwhile, use “Connect with a key / token”." : ""}
               </Prerequisite>
             )}
             {entry.status === "access_pending" && <Prerequisite tone="warning" title="Waiting for provider approval">{entry.name} hasn't approved this platform's access yet.</Prerequisite>}
-            {oauthReady && entry.connectFields?.map((f) => (
-              <Field key={f.key} label={f.label} hint={f.help}>{(p) => <Input {...p} data-autofocus placeholder={f.placeholder} value={values[f.key] ?? ""} onChange={(e) => setValues({ ...values, [f.key]: e.target.value })} />}</Field>
+            {guide?.signIn && <div><p className="mb-2 font-medium">How it works</p><Steps steps={guide.signIn} /></div>}
+            {oauthReady && !readOnly && entry.connectFields?.map((f) => (
+              <Field key={f.key} label={f.label} hint={f.help}>{(p) => <Input {...p} data-autofocus placeholder={f.placeholder} value={values[f.key] ?? ""} onChange={(e) => setField(f.key, e.target.value)} />}</Field>
             ))}
           </>
         )}
+
         {method === "token" && token && (
           <>
-            <ol className="list-decimal space-y-1.5 pl-5 text-muted">{token.instructions.map((t) => <li key={t}>{t}</li>)}</ol>
-            {token.fields.map((f) => (
-              <Field key={f.key} label={`${f.label}${f.optional ? " (optional)" : ""}`} hint={f.help}>{(p) => <Input {...p} type={f.secret ? "password" : "text"} autoComplete="off" spellCheck={false} placeholder={f.placeholder} value={values[f.key] ?? ""} onChange={(e) => setValues({ ...values, [f.key]: e.target.value })} />}</Field>
+            {token.variants && token.variants.length > 1 && (
+              <div role="radiogroup" aria-label="How to connect" className="flex flex-wrap gap-1.5">
+                {token.variants.map((x) => (
+                  <button key={x.id} type="button" role="radio" aria-checked={variant === x.id} onClick={() => { setVariant(x.id); setValues({}); setError(null); }}
+                    className={cn("rounded-[4px] border px-2.5 py-1.5 text-xs transition-colors", variant === x.id ? "border-accent/60 bg-accent/10 text-accent" : "border-line text-muted hover:border-line-strong hover:text-fg")}>
+                    {x.label}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div><p className="mb-2 font-medium">Step by step</p><Steps steps={steps} /></div>
+            {!readOnly && fields.map((f) => (
+              <Field key={`${variant}:${f.key}`} label={`${f.label}${f.optional ? " (optional)" : ""}`} hint={f.help}>{(p) => f.multiline
+                ? <Textarea {...p} rows={6} autoComplete="off" spellCheck={false} placeholder={f.placeholder} value={values[f.key] ?? ""} onChange={(e) => setField(f.key, e.target.value)} className={cn("font-mono text-xs", f.secret && "[-webkit-text-security:disc]")} />
+                : <Input {...p} type={f.secret ? "password" : "text"} autoComplete="off" spellCheck={false} placeholder={f.placeholder} value={values[f.key] ?? ""} onChange={(e) => setField(f.key, e.target.value)} />}</Field>
             ))}
-            <p className="text-xs text-subtle">The key is checked with {entry.name}, encrypted before it's stored and never shown again. Data syncs on a schedule. You can revoke it in {entry.name} at any time.</p>
+            {!readOnly && <p className="text-xs text-subtle">Everything you enter is checked with {entry.name}, encrypted before it's stored and never shown again. Data syncs on a schedule. You can revoke access in {entry.name} at any time.</p>}
           </>
         )}
+
+        {guide && (
+          <div className="space-y-2">
+            {guide.needs.length > 0 && <GuideSection title="What you'll need" open={method === "token"}><ul className="list-disc space-y-1 pl-5 text-muted">{guide.needs.map((n) => <li key={n}>{n}</li>)}</ul></GuideSection>}
+            {guide.signIn && method === "token" && entry.oauth && <GuideSection title="One-click sign-in (when enabled)"><Steps steps={guide.signIn} /></GuideSection>}
+            {guide.adminSetup && (
+              <GuideSection title={`Enable one-click sign-in for everyone${entry.status === "config_required" ? "" : " (done)"}`}>
+                <p className="text-xs text-subtle">A platform administrator does this once{me.data?.user.isPlatformAdmin ? " — that's you: paste the credentials in Platform admin → Credentials" : ""}.</p>
+                <Steps steps={guide.adminSetup} />
+                {entry.redirectUri && <p className="break-all font-mono text-[11px] text-muted">Redirect URL: {entry.redirectUri}</p>}
+              </GuideSection>
+            )}
+            {guide.troubleshooting && <GuideSection title="Troubleshooting"><ul className="list-disc space-y-1 pl-5 text-muted">{guide.troubleshooting.map((n) => <li key={n}>{n}</li>)}</ul></GuideSection>}
+            {(guide.links?.length || entry.docsUrl) && (
+              <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                {[...(guide.links ?? []), ...(entry.docsUrl && !guide.links?.some((l) => l.url === entry.docsUrl) ? [{ label: `${entry.name} documentation`, url: entry.docsUrl }] : [])].map((l) => (
+                  <a key={l.url} href={l.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-accent hover:underline"><ExternalLink className="size-3" />{l.label}</a>
+                ))}
+              </p>
+            )}
+          </div>
+        )}
+
         {entry.scopes.length > 0 && <div>
           <p className="mb-2 font-medium">Permissions needed (read-only)</p>
           <ul className="space-y-1.5">
@@ -354,7 +445,7 @@ function ConnectDialog({ entry, onClose, reconnectId, onConnected }: { entry: Ca
             <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-muted">{entry.accessRequirements.map((r) => <li key={r}>{r}</li>)}</ul>
           </details>
         )}
-        {method === "oauth" && <p className="text-xs text-subtle">You'll be sent to {entry.name} to approve access, then brought back to choose which accounts to sync. You can skip this and connect later.</p>}
+        {method === "oauth" && oauthReady && !readOnly && <p className="text-xs text-subtle">You'll be sent to {entry.name} to approve access, then brought back to choose which accounts to sync.</p>}
         {error && <p role="alert" className="text-danger">{error}</p>}
       </div>
     </Dialog>

@@ -3,7 +3,8 @@ import { ProviderError, providerFetch } from "../http.js";
 import { syncReport, type ReportRow } from "../report.js";
 import { formatMetricValue, type ActionTarget } from "@bca/shared";
 import type { ActionContext, ActionDefinition, ActionPayload, AssetInfo, ConnectorDefinition, Credentials, SyncContext } from "../types.js";
-import { G, googleAuthorizeUrl, googleCallback, googleNeedsRefresh, googleRefresh, googleRevoke } from "./oauth.js";
+import { G, googleAuthorizeUrl, googleCallback } from "./oauth.js";
+import { OWN_CLIENT_FIELDS, connectGoogleVariant, googleNeedsRefresh, googleRefresh, googleRevokeIfOwned, googleTokenResult, ownClientSteps } from "./access.js";
 
 /**
  * Google Ads via the Google Ads API (REST, GAQL searchStream). Every request needs
@@ -15,12 +16,22 @@ import { G, googleAuthorizeUrl, googleCallback, googleNeedsRefresh, googleRefres
 const SCOPE = "https://www.googleapis.com/auth/adwords";
 const version = () => process.env.GOOGLE_ADS_API_VERSION ?? "v25";
 const API = (path: string) => G(`https://googleads.googleapis.com/${version()}/${path}`);
+const OWN_ADS_FIELDS = [
+  { key: "developerToken", label: "Developer token", placeholder: "22 characters", secret: true, help: "Google Ads manager account → Tools → API Center." },
+  ...OWN_CLIENT_FIELDS,
+];
+const OWN_ADS_STEPS = [
+  "You need a Google Ads manager (MCC) account that manages your ad account — create one free at ads.google.com/home/tools/manager-accounts and link your account to it.",
+  "In the manager account open Tools → API Center, accept the terms and copy the developer token. A new token has Test access only; apply for Explorer or Basic access there to reach real accounts.",
+  ...ownClientSteps(SCOPE, "Google Ads API"),
+];
 const OWNED = ["ad_spend", "ad_impressions", "ad_clicks", "ad_conversions", "ad_conversion_value"];
 
 function headers(creds: Credentials, loginCustomerId?: string | null) {
   return {
     Authorization: `Bearer ${creds.access_token}`,
-    "developer-token": process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? "",
+    // Connections made with the user's own Google Cloud client carry their own developer token.
+    "developer-token": creds.developer_token ?? process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? "",
     ...(loginCustomerId ? { "login-customer-id": loginCustomerId } : {}),
   };
 }
@@ -28,7 +39,7 @@ function headers(creds: Credentials, loginCustomerId?: string | null) {
 /** Developer-token problems are platform setup issues, not user errors — say so plainly. */
 function explain(e: unknown): never {
   if (e instanceof ProviderError && /DEVELOPER_TOKEN_(NOT_APPROVED|PROHIBITED|INVALID)|developer token/i.test(e.detail ?? "")) {
-    throw new ProviderError("scope", "This platform's Google Ads developer token isn't approved for production accounts yet (it can only reach test accounts). The operator must request Basic access from Google.", e.status, undefined, e.detail);
+    throw new ProviderError("scope", "The Google Ads developer token isn't approved for this account (test-level tokens only reach test accounts). Apply for Explorer or Basic access in the manager account's API Center.", e.status, undefined, e.detail);
   }
   if (e instanceof ProviderError && /CUSTOMER_NOT_ENABLED|NOT_ADS_USER/.test(e.detail ?? "")) {
     throw new ProviderError("permanent", "This Google Ads account isn't enabled or the signed-in user has no Google Ads access.", e.status, undefined, e.detail);
@@ -308,6 +319,19 @@ export const googleAds: ConnectorDefinition = {
   staleAfterHours: 12,
   syncIntervalMinutes: 180,
   reconcileDays: 30,
+  tokenConnect: {
+    fields: OWN_ADS_FIELDS,
+    instructions: OWN_ADS_STEPS,
+    async connect(input) {
+      const developer_token = (input.developerToken ?? "").trim();
+      if (!/^[A-Za-z0-9_-]{16,40}$/.test(developer_token)) throw new ProviderError("permanent", "Enter the 22-character developer token from your Google Ads manager account (Tools → API Center).");
+      const v = await connectGoogleVariant({ ...input, _method: "own_client" }, [SCOPE]);
+      const creds = { ...v.creds, developer_token };
+      const accounts = await listAccounts(creds);
+      if (!accounts.length) throw new ProviderError("permanent", "No enabled Google Ads accounts are accessible to the Google user that created the refresh token.");
+      return googleTokenResult({ ...v, creds }, { externalAccountId: `gads:${accounts.map((a) => a.providerAssetId).sort()[0]}`, displayName: accounts.length === 1 ? accounts[0]!.name : `Google Ads (${accounts.length} accounts)` });
+    },
+  },
   authorizeUrl: ({ state, redirectUri }) => googleAuthorizeUrl([SCOPE], state, redirectUri),
   async handleCallback({ query, redirectUri }) {
     const { creds, scopes, expiresAt } = await googleCallback(query, redirectUri, [SCOPE]);
@@ -333,5 +357,5 @@ export const googleAds: ConnectorDefinition = {
     const creds = await ctx.credentials();
     await search(ctx.asset.provider_asset_id, creds, (ctx.asset.metadata?.loginCustomerId as string | undefined) ?? null, "SELECT customer.id FROM customer LIMIT 1");
   },
-  revoke: (creds) => googleRevoke(creds),
+  revoke: (creds) => googleRevokeIfOwned(creds),
 };

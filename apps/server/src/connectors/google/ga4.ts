@@ -1,7 +1,8 @@
 import { ProviderError, providerFetch } from "../http.js";
 import { syncReport, type ReportRow } from "../report.js";
 import type { ConnectorDefinition, Credentials, SyncContext } from "../types.js";
-import { G, bearer, googleAuthorizeUrl, googleCallback, googleNeedsRefresh, googleRefresh, googleRevoke } from "./oauth.js";
+import { G, bearer, googleAuthorizeUrl, googleCallback } from "./oauth.js";
+import { OWN_CLIENT_FIELDS, SA_FIELD, connectGoogleVariant, googleNeedsRefresh, googleRefresh, googleRevokeIfOwned, googleTokenResult, ownClientSteps } from "./access.js";
 
 /**
  * Google Analytics 4 via the Analytics Data API (runReport) and Admin API
@@ -32,6 +33,12 @@ const BREAKDOWNS: { dimKey: string; ga4: string; metrics: string[]; limit?: numb
 ];
 
 const DATA = (path: string) => G(`https://analyticsdata.googleapis.com/v1beta/${path}`);
+const SA_STEPS = [
+  "In Google Cloud (console.cloud.google.com) pick or create a project, then enable the “Google Analytics Data API” and “Google Analytics Admin API” (APIs & Services → Library).",
+  "IAM & Admin → Service accounts → Create service account (no roles needed). Open it → Keys → Add key → Create new key → JSON. A .json file downloads.",
+  "Copy the service account's email (…@….iam.gserviceaccount.com). In Google Analytics open Admin → Property access management (or Account access management for all properties) → + → Add users, paste the email and give it the Viewer role.",
+  "Open the .json file in a text editor, copy everything and paste it below.",
+];
 const ADMIN = (path: string) => G(`https://analyticsadmin.googleapis.com/v1beta/${path}`);
 
 /**
@@ -126,6 +133,25 @@ export const ga4: ConnectorDefinition = {
   staleAfterHours: 30,
   syncIntervalMinutes: 180,
   reconcileDays: 30,
+  tokenConnect: {
+    fields: [SA_FIELD],
+    instructions: SA_STEPS,
+    variants: [
+      { id: "service_account", label: "Service-account key", fields: [SA_FIELD], instructions: SA_STEPS },
+      { id: "own_client", label: "Your own OAuth client", fields: OWN_CLIENT_FIELDS, instructions: ownClientSteps(SCOPE, "Google Analytics Data API and Google Analytics Admin API") },
+    ],
+    async connect(input) {
+      const v = await connectGoogleVariant(input, [SCOPE]);
+      const { data } = await providerFetch(ADMIN("accountSummaries?pageSize=200"), { provider: "Google Analytics", headers: bearer(v.creds) });
+      const first = (data.accountSummaries ?? []).find((a: any) => a.propertySummaries?.length);
+      if (!first) {
+        throw new ProviderError("permanent", v.creds.mode === "service_account"
+          ? `The service account ${v.identity} can't see any GA4 property yet. In Google Analytics open Admin → Property access management, add that email as a Viewer, then try again (it can take a minute to apply).`
+          : "This Google account has no Google Analytics properties.");
+      }
+      return googleTokenResult(v, { externalAccountId: `ga:${first.account}:${v.identity}`, displayName: first.displayName ?? "Google Analytics" });
+    },
+  },
   authorizeUrl: ({ state, redirectUri }) => googleAuthorizeUrl([SCOPE], state, redirectUri),
   async handleCallback({ query, redirectUri }) {
     const { creds, scopes, expiresAt } = await googleCallback(query, redirectUri, [SCOPE]);
@@ -162,5 +188,5 @@ export const ga4: ConnectorDefinition = {
     const creds = await ctx.credentials();
     await providerFetch(ADMIN(ctx.asset.provider_asset_id), { provider: "Google Analytics", headers: bearer(creds) });
   },
-  revoke: (creds) => googleRevoke(creds),
+  revoke: (creds) => googleRevokeIfOwned(creds),
 };

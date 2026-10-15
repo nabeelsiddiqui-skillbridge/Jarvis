@@ -16,6 +16,7 @@ import { DashboardView } from "./pages/app/DashboardView";
 import { Connections } from "./pages/app/Connections";
 import { Businesses } from "./pages/app/Businesses";
 import { BusinessSettings } from "./pages/app/BusinessSettings";
+import { VoiceSettings } from "./pages/app/VoiceSettings";
 import { Team } from "./pages/app/Team";
 import { WorkspaceSettings } from "./pages/app/WorkspaceSettings";
 import { Account } from "./pages/app/Account";
@@ -58,6 +59,7 @@ export const router = createBrowserRouter([
           { path: "automations", element: <Automations /> },
           { path: "reports", element: <Reports /> },
           { path: "reports/:reportId", element: <ReportView /> },
+          { path: "voice", element: <VoiceSettings /> },
           { path: "settings", element: <BusinessSettings /> },
         ],
       },

@@ -32,7 +32,7 @@ export function Account() {
             <div className="flex justify-end"><Button type="submit" variant="primary">Save</Button></div>
           </form>
         </Card>
-        <Card title="JARVIS voice" description="The voice used when JARVIS answers out loud. Voices come from ElevenLabs; your choice is personal to you." className="xl:col-span-2">
+        <Card title="JARVIS voice" description="The voice used when JARVIS answers out loud (also under Voice settings in each business). Voices come from ElevenLabs; your choice is personal to you." className="xl:col-span-2">
           <VoicePicker />
         </Card>
         <Card title="Password" description="Changing it signs you out on every other device.">

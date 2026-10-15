@@ -1,6 +1,6 @@
 import express from "express";
 import type { Server } from "node:http";
-import { randomBytes } from "node:crypto";
+import { createVerify, randomBytes } from "node:crypto";
 import { addDays, todayIn } from "@bca/shared";
 
 /**
@@ -44,7 +44,13 @@ export interface GoogleState {
   accessTokens: Map<string, string[]>; // token → scopes
   refreshTokens: Map<string, string[]>;
   adsTokenApproved: boolean;
-  calls: { refresh: number; revoke: number; runReport: number; gscQuery: number; adsSearch: number; mutates: number; validateOnly: number };
+  /** Service accounts the stand-in trusts: email → public key (PEM). */
+  serviceAccounts: Map<string, string>;
+  /** User-owned OAuth clients: client id → secret. */
+  ownClients: Map<string, string>;
+  /** Extra developer tokens accepted besides the platform's. */
+  devTokens: Set<string>;
+  calls: { refresh: number; revoke: number; runReport: number; gscQuery: number; adsSearch: number; mutates: number; validateOnly: number; jwt: number };
   /** Campaign settings per customer (for actions). */
   campaigns: Record<string, { id: string; name: string; status: "ENABLED" | "PAUSED"; budgetId: string; budgetMicros: number; shared: boolean }[]>;
   /** Failure injection for mutations: apply the change but answer 503 (ambiguous), or fail before applying. */
@@ -120,14 +126,14 @@ const ymd = (d: string) => d.replaceAll("-", "");
 export async function startMockGoogle(port = 0) {
   const state: GoogleState = {
     ga4: makeGa4(), gsc: makeGsc(), ads: makeAds(), gscLagDays: 2,
-    accessTokens: new Map(), refreshTokens: new Map(), adsTokenApproved: true,
+    accessTokens: new Map(), refreshTokens: new Map(), adsTokenApproved: true, serviceAccounts: new Map(), ownClients: new Map(), devTokens: new Set(),
     campaigns: Object.fromEntries(["2222222222", "3333333333"].map((cid) => [cid, [
       { id: "101", name: "Brand Search", status: "ENABLED" as const, budgetId: "9101", budgetMicros: 50_000_000, shared: false },
       { id: "102", name: "Performance Max — All products", status: "ENABLED" as const, budgetId: "9102", budgetMicros: 120_000_000, shared: false },
       { id: "103", name: "Shopping — Jackets", status: "PAUSED" as const, budgetId: "9100", budgetMicros: 30_000_000, shared: true },
     ]])),
     mutateFail: { applyThen503: 0, before503: 0, reject400: 0 },
-    calls: { refresh: 0, revoke: 0, runReport: 0, gscQuery: 0, adsSearch: 0, mutates: 0, validateOnly: 0 }, fail: { next503: 0 },
+    calls: { refresh: 0, revoke: 0, runReport: 0, gscQuery: 0, adsSearch: 0, mutates: 0, validateOnly: 0, jwt: 0 }, fail: { next503: 0 },
   };
   const app = express();
   app.use(express.json());
@@ -152,7 +158,19 @@ export async function startMockGoogle(port = 0) {
   });
   app.post("/oauth2.googleapis.com/token", (req, res) => {
     const b = req.body;
-    if (b.client_id !== process.env.GOOGLE_CLIENT_ID || b.client_secret !== process.env.GOOGLE_CLIENT_SECRET) return res.status(401).json({ error: "invalid_client" });
+    if (b.grant_type === "urn:ietf:params:oauth:grant-type:jwt-bearer") {
+      // Service-account assertion: verify the RS256 signature with the registered public key.
+      const [h, c, sig] = String(b.assertion ?? "").split(".");
+      const claims = c ? JSON.parse(Buffer.from(c, "base64url").toString()) : {};
+      const pub = state.serviceAccounts.get(claims.iss);
+      const ok = pub && sig && createVerify("RSA-SHA256").update(`${h}.${c}`).verify(pub, Buffer.from(sig, "base64url"));
+      if (!ok || claims.aud !== "https://oauth2.googleapis.com/token" || claims.exp <= Date.now() / 1000) return res.status(400).json({ error: "invalid_grant", error_description: "Invalid JWT Signature." });
+      state.calls.jwt++;
+      return res.json({ access_token: issueAccess(String(claims.scope).split(" ")), expires_in: 3599, token_type: "Bearer" });
+    }
+    const platform = b.client_id === process.env.GOOGLE_CLIENT_ID && b.client_secret === process.env.GOOGLE_CLIENT_SECRET;
+    const own = state.ownClients.get(b.client_id) === b.client_secret;
+    if (!platform && !own) return res.status(401).json({ error: "invalid_client" });
     if (b.grant_type === "refresh_token") {
       const scopes = state.refreshTokens.get(b.refresh_token);
       if (!scopes) return res.status(400).json({ error: "invalid_grant", error_description: "Token has been expired or revoked." });
@@ -281,7 +299,7 @@ export async function startMockGoogle(port = 0) {
   };
   const adsGate = (req: express.Request, res: express.Response) => {
     if (!authed(req, ADS)) { deny(res); return false; }
-    if (req.get("developer-token") !== process.env.GOOGLE_ADS_DEVELOPER_TOKEN) { res.status(401).json({ error: { code: 401, status: "UNAUTHENTICATED", details: [{ errors: [{ errorCode: { authenticationError: "DEVELOPER_TOKEN_INVALID" } }] }] } }); return false; }
+    if (req.get("developer-token") !== process.env.GOOGLE_ADS_DEVELOPER_TOKEN && !state.devTokens.has(req.get("developer-token") ?? "")) { res.status(401).json({ error: { code: 401, status: "UNAUTHENTICATED", details: [{ errors: [{ errorCode: { authenticationError: "DEVELOPER_TOKEN_INVALID" } }] }] } }); return false; }
     if (!state.adsTokenApproved) { res.status(403).json({ error: { code: 403, status: "PERMISSION_DENIED", message: "The developer token is only approved for use with test accounts.", details: [{ errors: [{ errorCode: { authorizationError: "DEVELOPER_TOKEN_NOT_APPROVED" } }] }] } }); return false; }
     return true;
   };

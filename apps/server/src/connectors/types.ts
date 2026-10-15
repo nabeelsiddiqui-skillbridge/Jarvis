@@ -42,6 +42,9 @@ export interface AssetRow {
 
 export type Credentials = Record<string, any>;
 
+/** A credential field the user fills in on the Connections page. */
+export interface TokenField { key: string; label: string; placeholder?: string; help?: string; secret?: boolean; optional?: boolean; multiline?: boolean }
+
 /** Everything a connector needs while syncing; all writes are scoped to this connection/asset. */
 export interface SyncContext {
   db: pg.PoolClient;
@@ -161,8 +164,14 @@ export interface ConnectorDefinition {
    * credentials. Such tokens don't expire and aren't refreshed; webhooks aren't registered.
    */
   tokenConnect?: {
-    fields: { key: string; label: string; placeholder?: string; help?: string; secret?: boolean; optional?: boolean }[];
+    fields: TokenField[];
     instructions: string[];
+    /**
+     * Alternative ways to connect without the platform app (e.g. a service-account key or the
+     * user's own OAuth client). When present, the UI lets the user pick one and sends its id as
+     * `input._method`; `fields`/`instructions` above describe the first variant.
+     */
+    variants?: { id: string; label: string; fields: TokenField[]; instructions: string[] }[];
     connect(input: Record<string, string>): Promise<CallbackResult>;
   };
   authorizeUrl?(p: { state: string; redirectUri: string; input: Record<string, string> }): string;

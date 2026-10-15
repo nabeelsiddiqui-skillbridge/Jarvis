@@ -503,6 +503,21 @@ const GROUP_URLS: Record<string, (c: any) => string[]> = {
   "Billing (Stripe)": (c) => [`Webhook endpoint: ${c.billing.webhookUrl}`],
 };
 
+/** Which connector's setup guide explains each credential group. */
+const GROUP_GUIDE: Record<string, string> = {
+  Shopify: "shopify", "Google (GA4, Search Console, Ads, Sheets)": "google_ads", "Meta (Ads, Pages, Instagram)": "meta_ads", "TikTok Ads": "tiktok_ads",
+  "LinkedIn Ads": "linkedin_ads", Salesforce: "salesforce", "QuickBooks Online": "quickbooks", Xero: "xero", HubSpot: "hubspot",
+};
+const GROUP_OTHER_STEPS: Record<string, string[]> = {
+  "AI assistant": ["Create a key at console.anthropic.com → API keys and paste it here. The assistant, briefings and insight explanations start working within seconds."],
+  Voice: [
+    "ElevenLabs (voices): elevenlabs.io → your profile → API keys → Create, with Text to Speech and Voices (read) access. Paste it here, then pick the default voice in Settings → Voice.",
+    "Deepgram (speech recognition, optional): console.deepgram.com → API keys → Create a key with Member permissions. Without it the browser's own speech recognition is used.",
+  ],
+  "Billing (Stripe)": ["Stripe Dashboard → Developers → API keys: copy the secret key. Create Products/Prices for each plan and paste their price IDs. Add the webhook endpoint below and paste its signing secret."],
+  Email: ["Use your email provider's SMTP settings, e.g. smtps://user:password@smtp.example.com:465, and a From address on a domain you've verified with that provider."],
+};
+
 /** Provider app credentials and API keys, set from the browser. Stored encrypted; secrets are never shown again. */
 function Credentials() {
   const q = useAdmin<Setting[]>("settings");
@@ -524,6 +539,15 @@ function Credentials() {
                   {GROUP_URLS[group]!(cfg.data).map((u) => <li key={u} className="break-all">{u}</li>)}
                 </ul>
               )}
+              {(() => {
+                const steps: string[] = GROUP_GUIDE[group] ? (cfg.data?.connectors.find((x: any) => x.id === GROUP_GUIDE[group])?.adminSetup ?? []) : (GROUP_OTHER_STEPS[group] ?? []);
+                return steps.length > 0 && (
+                  <details className="mb-4 rounded-[4px] border border-line bg-panel-2/40 px-3 py-2 text-sm">
+                    <summary className="cursor-pointer select-none font-medium">How to get these</summary>
+                    <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-muted">{steps.map((t) => <li key={t}>{t}</li>)}</ol>
+                  </details>
+                );
+              })()}
               <ul className="space-y-4">{items.map((s) => <SettingRow key={s.key} s={s} />)}</ul>
             </Card>
           ))}

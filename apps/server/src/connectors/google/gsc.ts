@@ -1,7 +1,8 @@
 import { ProviderError, providerFetch } from "../http.js";
 import { syncReport, type ReportRow } from "../report.js";
 import type { ConnectorDefinition, Credentials, SyncContext } from "../types.js";
-import { G, bearer, googleAuthorizeUrl, googleCallback, googleNeedsRefresh, googleRefresh, googleRevoke } from "./oauth.js";
+import { G, bearer, googleAuthorizeUrl, googleCallback } from "./oauth.js";
+import { OWN_CLIENT_FIELDS, SA_FIELD, connectGoogleVariant, googleNeedsRefresh, googleRefresh, googleRevokeIfOwned, googleTokenResult, ownClientSteps } from "./access.js";
 
 /**
  * Google Search Console via the Search Analytics API. Dates are in Pacific Time,
@@ -11,6 +12,12 @@ import { G, bearer, googleAuthorizeUrl, googleCallback, googleNeedsRefresh, goog
  * re-aggregated correctly over any range.
  */
 const SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
+const SA_STEPS = [
+  "In Google Cloud (console.cloud.google.com) pick or create a project and enable the “Google Search Console API” (APIs & Services → Library).",
+  "IAM & Admin → Service accounts → Create service account (no roles needed). Open it → Keys → Add key → Create new key → JSON. A .json file downloads.",
+  "Copy the service account's email (…@….iam.gserviceaccount.com). In Search Console pick your property → Settings → Users and permissions → Add user, paste the email and choose Restricted.",
+  "Open the .json file in a text editor, copy everything and paste it below.",
+];
 const PAGE = 5000;
 /** Safety cap per breakdown request; beyond it the long tail is folded into "(other)". */
 const MAX_ROWS = 50_000;
@@ -104,6 +111,25 @@ export const gsc: ConnectorDefinition = {
   staleAfterHours: 96,
   syncIntervalMinutes: 360,
   reconcileDays: 10,
+  tokenConnect: {
+    fields: [SA_FIELD],
+    instructions: SA_STEPS,
+    variants: [
+      { id: "service_account", label: "Service-account key", fields: [SA_FIELD], instructions: SA_STEPS },
+      { id: "own_client", label: "Your own OAuth client", fields: OWN_CLIENT_FIELDS, instructions: ownClientSteps(SCOPE, "Google Search Console API") },
+    ],
+    async connect(input) {
+      const v = await connectGoogleVariant(input, [SCOPE]);
+      const { data } = await providerFetch(API("sites"), { provider: "Search Console", headers: bearer(v.creds) });
+      const sites = (data.siteEntry ?? []).filter((s: any) => s.permissionLevel !== "siteUnverifiedUser");
+      if (!sites.length) {
+        throw new ProviderError("permanent", v.creds.mode === "service_account"
+          ? `The service account ${v.identity} has no access to a Search Console property yet. In Search Console open Settings → Users and permissions → Add user, paste that email with Restricted (or Full) permission, then try again.`
+          : "This Google account has no verified Search Console properties.");
+      }
+      return googleTokenResult(v, { externalAccountId: `gsc:${sites[0].siteUrl}:${v.identity}`, displayName: sites.length === 1 ? sites[0].siteUrl : `Search Console (${sites.length} properties)` });
+    },
+  },
   authorizeUrl: ({ state, redirectUri }) => googleAuthorizeUrl([SCOPE], state, redirectUri),
   async handleCallback({ query: q, redirectUri }) {
     const { creds, scopes, expiresAt } = await googleCallback(q, redirectUri, [SCOPE]);
@@ -143,5 +169,5 @@ export const gsc: ConnectorDefinition = {
     const creds = await ctx.credentials();
     await providerFetch(API(`sites/${encodeURIComponent(ctx.asset.provider_asset_id)}`), { provider: "Search Console", headers: bearer(creds) });
   },
-  revoke: (creds) => googleRevoke(creds),
+  revoke: (creds) => googleRevokeIfOwned(creds),
 };

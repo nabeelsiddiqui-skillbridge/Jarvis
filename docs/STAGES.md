@@ -587,3 +587,40 @@ Status of each stage of the build plan: what works, what is simulated, and what 
 - **Google:** add the Sheets scope to the OAuth consent screen.
 
 Token connections work without any of these.
+
+---
+
+## Every connector ready to connect, with guides; voice settings
+
+**No platform app needed for any connector.** Every connector can now be connected from the browser using the customer's own credentials:
+- **Google Analytics 4, Search Console:** a Google service-account JSON key (the customer adds the service-account email as Viewer/user of their property), or the customer's own Google OAuth client plus a refresh token from the OAuth 2.0 Playground. Access tokens are minted from the key with a signed JWT (RS256).
+- **Google Ads:** the customer's own developer token plus their own OAuth client and refresh token.
+- **Google Sheets:** a published CSV link, or a service-account key that the private sheet is shared with.
+- **QuickBooks Online:** the customer's own Intuit app (client ID/secret, a refresh token from Intuit's OAuth Playground, and the Realm ID). Rotating refresh tokens are stored on every refresh.
+- Keys and tokens that belong to the customer are never revoked on disconnect, because they manage them.
+- One-click sign-in still appears once a platform administrator adds the platform app credentials.
+
+**How-to guides**
+- Every catalog entry has a guide. It includes a summary of the ways to connect, what you'll need, step-by-step instructions for each method (selectable when there are several), the one-click sign-in steps, how an administrator enables one-click sign-in (with this platform's redirect URL), troubleshooting, and documentation links.
+- "How to connect" is available to every member, including viewers.
+- Platform admin → Credentials shows "How to get these" for every credential group.
+
+**Voice settings** (sidebar → Voice settings; also under Account):
+- **Choosing a voice:** search and filter the ElevenLabs voices, preview each with ▶ using custom text, and pick a personal voice or fall back to the default.
+- **Tuning (per user):** model (Flash v2.5, Turbo v2.5, Multilingual v2, v3), speed, stability, clarity/similarity and style. Tuning is applied to every spoken answer.
+- **Platform administrators:** paste the ElevenLabs API key there (it's checked with ElevenLabs first, then encrypted and audited), replace it later, and press ★ to make a voice the default for everyone.
+
+**Verification**
+- 190 server tests pass. New tests cover:
+  - a service-account key signed and verified by the Google stand-in, including JWT refresh and no revoke;
+  - the own-client paths for Search Console and Google Ads;
+  - the QuickBooks own app with token rotation;
+  - guides for all 23 connectors;
+  - voice key/default permissions and audit;
+  - tuning applied to speech.
+- Browser walkthrough (desktop and 390px):
+  - the Connections search, the GA4 dialog with both methods, and the Meta guide;
+  - the voice page: add key → choose voice → tune → save;
+  - no horizontal overflow and no unexpected console errors.
+
+**Simulated:** service-account and OAuth Playground flows were exercised against stand-ins. The Google and Intuit endpoints follow their documented token formats, but they need a check with real keys.

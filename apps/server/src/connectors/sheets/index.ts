@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { ProviderError, providerFetch } from "../http.js";
 import { businessTimezone, overridable } from "../kit.js";
 import type { ConnectorDefinition, Credentials, SyncContext } from "../types.js";
-import { bearer, googleAuthorizeUrl, googleCallback, googleNeedsRefresh, googleRefresh, googleRevoke } from "../google/oauth.js";
+import { bearer, googleAuthorizeUrl, googleCallback } from "../google/oauth.js";
+import { SA_FIELD, connectGoogleVariant, googleNeedsRefresh, googleRefresh, googleRevokeIfOwned, googleTokenResult } from "../google/access.js";
 import { ownedMetrics, rewriteFromRows, storeTable } from "./csv.js";
 import { MAX_ROWS, TableError, parseCsvTable, parseTable, type Cell, type ParsedTable } from "./parse.js";
 
@@ -18,6 +19,25 @@ import { MAX_ROWS, TableError, parseCsvTable, parseTable, type Cell, type Parsed
  */
 
 const SCOPE = "https://www.googleapis.com/auth/spreadsheets.readonly";
+const PUBLISHED_FIELDS = [{ key: "url", label: "Published CSV link", placeholder: "https://docs.google.com/spreadsheets/d/e/…/pub?output=csv", help: "File → Share → Publish to web → choose the tab → Comma-separated values (.csv)." }];
+const PUBLISHED_STEPS = [
+  "Lay the sheet out with a header row: a \"date\" column (YYYY-MM-DD) and one column per metric, named by metric (e.g. store_net_sales, ad_spend, acct_revenue). Download the CSV template on the CSV upload card for every supported column.",
+  "In Google Sheets choose File → Share → Publish to web.",
+  "Under Link, pick the tab with your figures and \"Comma-separated values (.csv)\", then click Publish.",
+  "Copy the link it shows (https://docs.google.com/spreadsheets/d/e/…/pub?…output=csv) and paste it here. Anyone with the link can read the published tab; use the service-account option (or Sign in with Google) to keep the sheet private.",
+];
+const SA_SHEET_FIELDS = [
+  { key: "spreadsheetUrl", label: "Spreadsheet link", placeholder: "https://docs.google.com/spreadsheets/d/…/edit", help: "The sheet's normal link from the address bar." },
+  { key: "tab", label: "Tab name", placeholder: "Sheet1", optional: true, help: "Leave empty to use the first tab." },
+  SA_FIELD,
+];
+const SA_SHEET_STEPS = [
+  "Lay the sheet out with a header row: a \"date\" column (YYYY-MM-DD) and one column per metric (download the CSV template on the CSV upload card for every supported column).",
+  "In Google Cloud (console.cloud.google.com) pick or create a project and enable the “Google Sheets API”.",
+  "IAM & Admin → Service accounts → Create service account (no roles needed). Open it → Keys → Add key → Create new key → JSON.",
+  "In Google Sheets click Share and add the service account's email (…@….iam.gserviceaccount.com) as a Viewer. The sheet stays private.",
+  "Paste the sheet link, optionally the tab name, and the whole contents of the .json key below.",
+];
 const G = overridable("GOOGLE_BASE_URL_OVERRIDE");
 const SHEETS = (path: string) => G(`https://sheets.googleapis.com/v4/${path}`);
 const PROVIDER = "Google Sheets";
@@ -149,14 +169,28 @@ export const googleSheets: ConnectorDefinition = {
     { key: "tab", label: "Tab name (optional)", placeholder: "Sheet1", help: "Leave empty to use the first tab." },
   ],
   tokenConnect: {
-    fields: [{ key: "url", label: "Published CSV link", placeholder: "https://docs.google.com/spreadsheets/d/e/…/pub?output=csv", help: "File → Share → Publish to web → choose the tab → Comma-separated values (.csv)." }],
-    instructions: [
-      "Lay the sheet out with a header row: a \"date\" column (YYYY-MM-DD) and one column per metric, named by metric (e.g. store_net_sales, ad_spend, acct_revenue). Download the CSV template on the CSV upload card for every supported column.",
-      "In Google Sheets choose File → Share → Publish to web.",
-      "Under Link, pick the tab with your figures and \"Comma-separated values (.csv)\", then click Publish.",
-      "Copy the link it shows (https://docs.google.com/spreadsheets/d/e/…/pub?…output=csv) and paste it here. Anyone with the link can read the published tab; use \"Sign in with Google\" instead to keep the sheet private.",
+    fields: PUBLISHED_FIELDS,
+    instructions: PUBLISHED_STEPS,
+    variants: [
+      { id: "published", label: "Published CSV link", fields: PUBLISHED_FIELDS, instructions: PUBLISHED_STEPS },
+      { id: "service_account", label: "Service-account key (private sheet)", fields: SA_SHEET_FIELDS, instructions: SA_SHEET_STEPS },
     ],
     async connect(input) {
+      if (input._method === "service_account") {
+        const id = spreadsheetId(input.spreadsheetUrl ?? "");
+        const v = await connectGoogleVariant(input, [SCOPE]);
+        let info: Awaited<ReturnType<typeof spreadsheetInfo>>;
+        try {
+          info = await spreadsheetInfo(v.creds, id);
+        } catch (e) {
+          if (e instanceof ProviderError && (e.kind === "not_found" || e.kind === "scope")) throw new ProviderError("permanent", `The service account ${v.identity} can't open that spreadsheet. In Google Sheets click Share, add that email as a Viewer, then try again.`);
+          throw e;
+        }
+        const wanted = (input.tab ?? "").trim();
+        const tab = wanted ? info.tabs.find((t) => t.toLowerCase() === wanted.toLowerCase()) : info.tabs[0];
+        if (!tab) throw new ProviderError("permanent", wanted ? `The spreadsheet has no tab named "${wanted}".` : "The spreadsheet has no tabs.");
+        return googleTokenResult(v, { externalAccountId: `${id}:${tab}`, displayName: `${info.title} · ${tab}`, extra: { spreadsheetId: id, tab } });
+      }
       const { url, id } = publishedUrl(input.url ?? "");
       const text = await fetchPublished(url);
       try {
@@ -203,7 +237,6 @@ export const googleSheets: ConnectorDefinition = {
     else await spreadsheetInfo(creds, creds.spreadsheetId);
   },
   async revoke(creds) {
-    if (creds.mode === "published") return; // the owner unpublishes the sheet in Google
-    await googleRevoke(creds);
+    await googleRevokeIfOwned(creds); // published links and keys stay with their owner
   },
 };

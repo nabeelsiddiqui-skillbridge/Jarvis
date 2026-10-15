@@ -1,4 +1,4 @@
-import { Bot, Building2, CreditCard, Gauge, LayoutDashboard, Lightbulb, Plug, FileText, Settings, ShieldCheck, Users, Workflow } from "lucide-react";
+import { AudioLines, Bot, Building2, CreditCard, Gauge, LayoutDashboard, Lightbulb, Plug, FileText, Settings, ShieldCheck, Users, Workflow } from "lucide-react";
 
 export const businessNav = [
   { to: "", label: "Command Center", icon: Gauge, end: true },
@@ -8,6 +8,7 @@ export const businessNav = [
   { to: "insights", label: "Insights", icon: Lightbulb },
   { to: "automations", label: "Automations", icon: Workflow },
   { to: "reports", label: "Reports", icon: FileText },
+  { to: "voice", label: "Voice settings", icon: AudioLines },
   { to: "settings", label: "Business settings", icon: Settings },
 ] as const;
 

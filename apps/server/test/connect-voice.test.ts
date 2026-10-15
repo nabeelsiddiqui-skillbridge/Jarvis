@@ -48,9 +48,10 @@ describe("connecting with an access token (no platform OAuth app)", () => {
     const s = list.find((c: any) => c.id === "shopify");
     expect(s.status).toBe("config_required");
     expect(s.tokenConnect.fields.map((f: any) => f.key)).toEqual(["shop", "accessToken"]);
-    expect(s.statusNote).toMatch(/access token/);
+    expect(s.statusNote).toMatch(/key or token/);
     expect(list.find((c: any) => c.id === "hubspot").tokenConnect.fields[0].key).toBe("accessToken");
-    expect(list.find((c: any) => c.id === "ga4").tokenConnect).toBeNull();
+    expect(list.find((c: any) => c.id === "ga4").tokenConnect.variants.length).toBe(2); // service account or own client
+    expect(list.find((c: any) => c.id === "csv").tokenConnect).toBeNull(); // uploads instead
     // OAuth is still refused until an administrator adds the app credentials.
     expect((await owner.post(`/api/businesses/${businessId}/connections/shopify/authorize`, { input: { shop: "acme.myshopify.com" } })).status).toBe(412);
   });
@@ -111,7 +112,7 @@ describe("connecting with an access token (no platform OAuth app)", () => {
     await pool.query(`INSERT INTO workspace_memberships (workspace_id, user_id, role) VALUES ($1, $2, 'member')`, [ws, viewer.userId]);
     await pool.query(`INSERT INTO business_memberships (workspace_id, business_id, user_id, role) VALUES ($1, $2, $3, 'viewer')`, [ws, businessId, viewer.userId]);
     expect((await viewer.post(`/api/businesses/${businessId}/connections/hubspot/token`, { input: { accessToken: HS_TOKEN } })).status).toBe(403);
-    expect((await owner.post(`/api/businesses/${businessId}/connections/ga4/token`, { input: {} })).status).toBe(412);
+    expect((await owner.post(`/api/businesses/${businessId}/connections/csv/token`, { input: {} })).status).toBe(412);
   });
 });
 

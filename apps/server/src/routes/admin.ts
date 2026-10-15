@@ -12,6 +12,7 @@ import { FLAG_KEYS } from "../lib/flags.js";
 import { EnvironmentManaged, MANAGED_SETTINGS, isManaged, setPlatformSecret, settingSource, settingUpdatedAt } from "../lib/platformSecrets.js";
 import { notifyWorkspaceOwners } from "../lib/notify.js";
 import { rateLimit } from "../lib/rateLimit.js";
+import { guideFor } from "../connectors/guides.js";
 import { IMPLEMENTED, connectorStatus } from "../connectors/registry.js";
 import { effectivePlan, currentUsage } from "../billing/entitlements.js";
 import { priceFor, stripeConfigured, webhookConfigured } from "../billing/stripe.js";
@@ -303,7 +304,7 @@ adminRouter.get("/admin/config", (_req, res) => {
     appUrl: config.appUrl,
     apiUrl: config.apiUrl,
     secrets: configStatus(),
-    connectors: IMPLEMENTED.map((d) => ({ id: d.id, name: d.name, ...connectorStatus(d), redirectUri: `${config.apiUrl}/api/oauth/${d.id}/callback`, webhookUrl: d.verifyWebhook ? `${config.apiUrl}/api/webhooks/${d.id}` : null })),
+    connectors: IMPLEMENTED.map((d) => ({ id: d.id, name: d.name, ...connectorStatus(d), redirectUri: `${config.apiUrl}/api/oauth/${d.id}/callback`, webhookUrl: d.verifyWebhook ? `${config.apiUrl}/api/webhooks/${d.id}` : null, adminSetup: guideFor(d.id, `${config.apiUrl}/api/oauth/${d.id}/callback`)?.adminSetup ?? [] })),
     billing: {
       stripeConfigured: stripeConfigured(),
       webhookConfigured: webhookConfigured(),

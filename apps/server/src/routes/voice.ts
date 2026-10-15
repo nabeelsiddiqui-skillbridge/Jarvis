@@ -11,6 +11,10 @@ import { ProviderError, providerFetch, providerUrl } from "../connectors/http.js
 import { assertWithinLimit } from "../billing/entitlements.js";
 import { assertEnabled } from "../lib/flags.js";
 import { recordUsage } from "../lib/usage.js";
+import { EnvironmentManaged, setPlatformSecret, settingSource } from "../lib/platformSecrets.js";
+import { audit } from "../lib/audit.js";
+import { withSystem } from "../db/pool.js";
+import { conflict, forbidden } from "../lib/errors.js";
 
 /**
  * Voice. Speech-to-text streams directly from the browser to Deepgram using a
@@ -44,31 +48,110 @@ async function elevenVoices(): Promise<VoiceOption[]> {
   return voices;
 }
 
-async function userVoice(userId: string): Promise<string | null> {
-  return (await pool.query(`SELECT tts_voice FROM user_preferences WHERE user_id = $1`, [userId])).rows[0]?.tts_voice ?? null;
+/** ElevenLabs models users can pick (allow-listed; the platform default comes from ELEVENLABS_MODEL). */
+export const TTS_MODELS = [
+  { id: "eleven_flash_v2_5", label: "Flash v2.5", description: "Fastest replies (~75 ms), good quality — best for conversation" },
+  { id: "eleven_turbo_v2_5", label: "Turbo v2.5", description: "Fast, slightly richer delivery" },
+  { id: "eleven_multilingual_v2", label: "Multilingual v2", description: "Most natural and expressive, a little slower" },
+  { id: "eleven_v3", label: "Eleven v3", description: "Most expressive (newest), slowest" },
+] as const;
+const MODEL_IDS = TTS_MODELS.map((m) => m.id) as [string, ...string[]];
+
+/** Voice tuning, as ElevenLabs voice_settings (ranges per ElevenLabs: speed 0.7–1.2, others 0–1). */
+const ttsSettings = z.object({
+  model: z.enum(MODEL_IDS).optional(),
+  speed: z.number().min(0.7).max(1.2).optional(),
+  stability: z.number().min(0).max(1).optional(),
+  similarity: z.number().min(0).max(1).optional(),
+  style: z.number().min(0).max(1).optional(),
+}).strict();
+type TtsSettings = z.infer<typeof ttsSettings>;
+
+async function userVoicePrefs(userId: string): Promise<{ voice: string | null; settings: TtsSettings }> {
+  const r = (await pool.query(`SELECT tts_voice, tts_settings FROM user_preferences WHERE user_id = $1`, [userId])).rows[0];
+  const parsed = ttsSettings.safeParse(r?.tts_settings ?? {});
+  return { voice: r?.tts_voice ?? null, settings: parsed.success ? parsed.data : {} };
 }
 
-/** Voices the signed-in user can choose for spoken answers. */
+const platformModel = () => (MODEL_IDS.includes(config.voice.elevenlabsModel) ? config.voice.elevenlabsModel : "eleven_flash_v2_5");
+
+/** Voices the signed-in user can choose for spoken answers, their tuning, and what platform admins may change. */
 voiceRouter.get("/voice/voices", async (req, res) => {
-  const selected = await userVoice(req.user!.id);
+  const { voice: selected, settings } = await userVoicePrefs(req.user!.id);
+  const admin = {
+    canManage: req.user!.isPlatformAdmin,
+    keyFromEnvironment: settingSource("ELEVENLABS_API_KEY") === "environment",
+    defaultFromEnvironment: settingSource("ELEVENLABS_DEFAULT_VOICE_ID") === "environment",
+  };
+  const common = { settings, models: TTS_MODELS, platformModel: platformModel(), admin };
   if (!config.voice.elevenlabsKey) {
-    return res.json({ provider: config.voice.deepgramKey ? "deepgram" : "browser", voices: [], selected: null, defaultVoice: null, note: "Voice selection needs ElevenLabs (a platform administrator adds the API key in Admin → Credentials)." });
+    return res.json({ provider: config.voice.deepgramKey ? "deepgram" : "browser", voices: [], selected: null, defaultVoice: null, ...common,
+      note: req.user!.isPlatformAdmin ? "Add your ElevenLabs API key below to choose from your ElevenLabs voices." : "Voice selection needs ElevenLabs — ask a platform administrator to add the API key (Settings → Voice or Admin → Credentials)." });
   }
   try {
-    res.json({ provider: "elevenlabs", voices: await elevenVoices(), selected, defaultVoice: config.voice.elevenlabsVoice, note: null });
+    res.json({ provider: "elevenlabs", voices: await elevenVoices(), selected, defaultVoice: config.voice.elevenlabsVoice, ...common, note: null });
   } catch (e) {
     if (e instanceof ProviderError) console.warn("[voice] voice list failed", e.kind, e.status);
-    throw prerequisite(e instanceof ProviderError && e.kind === "auth" ? "ElevenLabs rejected the platform's API key." : "Couldn't load voices from ElevenLabs right now.");
+    throw prerequisite(e instanceof ProviderError && e.kind === "auth" ? "ElevenLabs rejected the platform's API key. A platform administrator can replace it in Settings → Voice." : "Couldn't load voices from ElevenLabs right now.");
   }
 });
 
 voiceRouter.put("/voice/preference", async (req, res) => {
-  const body = z.object({ voiceId: z.string().regex(VOICE_ID).nullable() }).parse(req.body);
+  const body = z.object({ voiceId: z.string().regex(VOICE_ID).nullable().optional(), settings: ttsSettings.optional() }).parse(req.body);
   if (body.voiceId && config.voice.elevenlabsKey) {
     const ok = (await elevenVoices().catch(() => [])).some((v) => v.id === body.voiceId);
     if (!ok) throw prerequisite("That voice isn't available on the platform's ElevenLabs account.");
   }
-  await pool.query(`INSERT INTO user_preferences (user_id, tts_voice) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET tts_voice = excluded.tts_voice, updated_at = now()`, [req.user!.id, body.voiceId]);
+  await pool.query(
+    `INSERT INTO user_preferences (user_id, tts_voice, tts_settings) VALUES ($1, $2, coalesce($3::jsonb, '{}'::jsonb))
+     ON CONFLICT (user_id) DO UPDATE SET
+       tts_voice = CASE WHEN $4 THEN excluded.tts_voice ELSE user_preferences.tts_voice END,
+       tts_settings = coalesce($3::jsonb, user_preferences.tts_settings), updated_at = now()`,
+    [req.user!.id, body.voiceId ?? null, body.settings ? JSON.stringify(body.settings) : null, body.voiceId !== undefined],
+  );
+  res.json({ ok: true });
+});
+
+function requireAdmin(req: Request) {
+  if (!req.user!.isPlatformAdmin) throw forbidden("Only platform administrators can change the platform's voice settings.");
+}
+
+async function setManaged(req: Request, key: string, value: string | null) {
+  try {
+    await setPlatformSecret(key, value, req.user!.id);
+  } catch (e) {
+    if (e instanceof EnvironmentManaged) throw conflict("This setting is defined in the hosting environment; change it there.");
+    throw e;
+  }
+  await withSystem((db) => audit(db, { actorUserId: req.user!.id, actorType: "support", action: "admin.setting_changed", targetType: "setting", targetId: key, metadata: { change: value === null ? "cleared" : "set", via: "voice_settings" }, ip: req.ip }));
+}
+
+/** Platform admins: the ElevenLabs API key, checked with ElevenLabs before it's saved. */
+voiceRouter.put("/voice/elevenlabs-key", async (req, res) => {
+  requireAdmin(req);
+  const { apiKey } = z.object({ apiKey: z.string().trim().min(20).max(200).regex(/^[A-Za-z0-9_-]+$/, "That doesn't look like an ElevenLabs API key.") }).parse(req.body);
+  try {
+    await providerFetch(XI("v1/voices"), { provider: "ElevenLabs", headers: { "xi-api-key": apiKey }, retries: 1 });
+  } catch (e) {
+    if (e instanceof ProviderError && (e.kind === "auth" || e.kind === "scope")) throw prerequisite("ElevenLabs rejected that key, or it lacks the Voices (read) permission. Create a key with Text to Speech and Voices access.");
+    throw prerequisite("Couldn't reach ElevenLabs to check the key. Try again in a moment.");
+  }
+  await setManaged(req, "ELEVENLABS_API_KEY", apiKey);
+  voiceCache = null;
+  res.json({ ok: true });
+});
+
+/** Platform admins: the voice everyone hears unless they pick their own. */
+voiceRouter.put("/voice/default", async (req, res) => {
+  requireAdmin(req);
+  const body = z.object({ voiceId: z.string().regex(VOICE_ID).nullable(), model: z.enum(MODEL_IDS).optional() }).parse(req.body);
+  if (body.voiceId) {
+    if (!config.voice.elevenlabsKey) throw prerequisite("Add the ElevenLabs API key first.");
+    const ok = (await elevenVoices().catch(() => [])).some((v) => v.id === body.voiceId);
+    if (!ok) throw prerequisite("That voice isn't available on the platform's ElevenLabs account.");
+  }
+  await setManaged(req, "ELEVENLABS_DEFAULT_VOICE_ID", body.voiceId);
+  if (body.model) await setManaged(req, "ELEVENLABS_MODEL", body.model);
   res.json({ ok: true });
 });
 const perUser = (req: Request) => req.user?.id ?? req.ip ?? "anon";
@@ -126,7 +209,7 @@ voiceRouter.post(
   },
 );
 
-const speakBody = z.object({ text: z.string().trim().min(1).max(1500), voiceId: z.string().regex(VOICE_ID).optional() });
+const speakBody = z.object({ text: z.string().trim().min(1).max(1500), voiceId: z.string().regex(VOICE_ID).optional(), settings: ttsSettings.optional() });
 
 voiceRouter.post(
   "/businesses/:businessId/voice/speak",
@@ -141,12 +224,15 @@ voiceRouter.post(
     if (config.voice.elevenlabsKey) {
       // ElevenLabs: the voice the user picked (or one being previewed), else the platform default.
       provider = "elevenlabs";
-      const voice = body.voiceId ?? (await userVoice(req.user!.id)) ?? config.voice.elevenlabsVoice;
+      const prefs = await userVoicePrefs(req.user!.id);
+      const t = { ...prefs.settings, ...(body.settings ?? {}) };
+      const voice = body.voiceId ?? prefs.voice ?? config.voice.elevenlabsVoice;
+      const voiceSettings = Object.fromEntries(Object.entries({ speed: t.speed, stability: t.stability, similarity_boost: t.similarity, style: t.style }).filter(([, v]) => v !== undefined));
       const q = new URLSearchParams({ output_format: "mp3_44100_128" });
       upstream = await fetch(`${XI(`v1/text-to-speech/${encodeURIComponent(voice)}/stream`)}?${q}`, {
         method: "POST",
         headers: { "xi-api-key": config.voice.elevenlabsKey, "Content-Type": "application/json", Accept: "audio/mpeg" },
-        body: JSON.stringify({ text: body.text, model_id: config.voice.elevenlabsModel }),
+        body: JSON.stringify({ text: body.text, model_id: t.model ?? platformModel(), ...(Object.keys(voiceSettings).length ? { voice_settings: voiceSettings } : {}) }),
         signal: AbortSignal.timeout(30_000),
       }).catch(() => null);
     } else {
