@@ -20,17 +20,17 @@ export interface ConnectorGuide {
 
 const metaAdmin = (perms: string) => [
   "At developers.facebook.com → My Apps → Create app, choose “Other” → “Business” and link it to your Business portfolio.",
-  "Add the “Facebook Login for Business” product. Under its Settings add {redirectUri} as a Valid OAuth Redirect URI.",
-  `Under App Review → Permissions and features request Advanced access for ${perms}. Until Meta approves, only people with a role on the app can connect.`,
-  "Copy the App ID and App secret (App settings → Basic) into Platform admin → Credentials → Meta.",
+  "Add the “Facebook Login for Business” product. Under its Settings add {redirectUri} as a Valid OAuth Redirect URI (add the Pages and Instagram redirect URLs too to use one app for all three).",
+  "Copy the App ID and App secret (App settings → Basic) and paste them here.",
+  `That's enough for you and anyone with a role on the app (App roles → add teammates) to sign in right away. To let outside customers sign in, request Advanced access for ${perms} under App Review and switch the app to Live.`,
 ];
 
 const googleAdmin = (api: string, scope: string) => [
   `In Google Cloud (console.cloud.google.com) create a project and enable the ${api} (APIs & Services → Library).`,
-  "APIs & Services → OAuth consent screen: choose External, fill in the app name, support email and authorized domain, and publish the app.",
-  `Add the scope ${scope}. It's a sensitive scope: Google verifies the app before people outside your organisation can use it (test users can connect meanwhile).`,
-  "APIs & Services → Credentials → Create credentials → OAuth client ID → Web application. Add {redirectUri} as an Authorized redirect URI.",
-  "Copy the client ID and secret into Platform admin → Credentials → Google. The same client serves GA4, Search Console, Google Ads and Sheets — add each one's redirect URI.",
+  "APIs & Services → OAuth consent screen (Google Auth Platform): choose External, fill in the app name and support email, then under Audience click “Publish app” (In production). In Testing mode Google expires sign-ins after 7 days.",
+  `Under Data access add the scope ${scope}. Until Google verifies the app, sign-in shows “Google hasn't verified this app” — click Advanced → Continue; it works for up to 100 users meanwhile.`,
+  "APIs & Services → Credentials → Create credentials → OAuth client ID → Web application. Add the redirect URL(s) shown here as Authorized redirect URIs.",
+  "Copy the client ID and client secret and paste them here. The same client serves GA4, Search Console, Google Ads and Sheets.",
 ];
 
 export const GUIDES: Record<string, ConnectorGuide> = {
@@ -81,7 +81,7 @@ export const GUIDES: Record<string, ConnectorGuide> = {
     signIn: ["Click Continue to Google Ads and sign in with a Google account that has access to the ad accounts.", "Approve Google Ads access.", "Choose the ad accounts to sync."],
     adminSetup: [
       ...googleAdmin("Google Ads API", "https://www.googleapis.com/auth/adwords"),
-      "In your Google Ads manager account open Tools → API Center, apply for Basic access and put the developer token into Platform admin → Credentials → Google Ads developer token.",
+      "Developer token: in a Google Ads manager account (free) open Tools → API Center, accept the terms and copy the token. Apply there for Explorer or Basic access — until Google approves it, the token only reaches test accounts.",
     ],
     troubleshooting: ["“Developer token isn't approved” — a new token only works with test accounts; apply for Explorer/Basic access in API Center.", "Accounts missing — the Google user who created the refresh token must have access to them (directly or through the manager account)."],
     links: [{ label: "Google Ads API: developer token", url: "https://developers.google.com/google-ads/api/docs/api-policy/developer-token" }, { label: "OAuth 2.0 Playground", url: "https://developers.google.com/oauthplayground" }],

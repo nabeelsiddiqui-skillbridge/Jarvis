@@ -185,7 +185,7 @@ export function Connections() {
         ))}
       </section>
 
-      <ConnectDialog entry={connecting} onClose={() => setConnecting(null)} reconnectId={connecting ? active.find((c) => c.provider === connecting.id && c.status === "reauth_required")?.id : undefined}
+      <ConnectDialog entry={connecting ? (catalog.data?.find((e) => e.id === connecting.id) ?? connecting) : null} siblings={catalog.data} onClose={() => setConnecting(null)} reconnectId={connecting ? active.find((c) => c.provider === connecting.id && c.status === "reauth_required")?.id : undefined}
         onConnected={async (id) => {
           setConnecting(null);
           const list = await qc.fetchQuery({ queryKey: connectionsKey(b.id), queryFn: () => get<Connection[]>(`/businesses/${b.id}/connections`), staleTime: 0 });
@@ -193,7 +193,7 @@ export function Connections() {
           toast("Connected — choose what to sync");
           if (c?.status === "selecting_assets") setAssetsFor(c);
         }} />
-      <ConnectDialog entry={guideFor} readOnly onClose={() => setGuideFor(null)} onConnected={() => setGuideFor(null)} />
+      <ConnectDialog entry={guideFor} siblings={catalog.data} readOnly onClose={() => setGuideFor(null)} onConnected={() => setGuideFor(null)} />
       <CsvUploadDialog open={Boolean(uploading)} connectionId={uploading?.connectionId} onClose={() => setUploading(null)} onDone={() => { setUploading(null); qc.invalidateQueries({ queryKey: ["b", b.id] }); }} />
       <AssetsDialog connection={assetsFor} onClose={() => setAssetsFor(null)} onSaved={() => { setAssetsFor(null); qc.invalidateQueries({ queryKey: connectionsKey(b.id) }); toast("Import started — data appears as it arrives."); }} />
     </>
@@ -319,7 +319,74 @@ function GuideSection({ title, children, open = false }: { title: string; childr
   );
 }
 
-function ConnectDialog({ entry, onClose, reconnectId, onConnected, readOnly }: { entry: CatalogEntry | null; onClose: () => void; reconnectId?: string; onConnected: (connectionId: string) => void; readOnly?: boolean }) {
+interface AdminSetting { key: string; label: string; group: string; secret: boolean; help: string | null; configured: boolean; source: "environment" | "admin" | null }
+
+/**
+ * Platform administrators turn on one-click sign-in right here: paste the provider app's
+ * credentials once (saved like Admin → Credentials: encrypted, audited) and every user can
+ * then simply sign in. Connectors sharing an app (Google, Meta) are enabled together.
+ */
+function SignInSetup({ entry, siblings }: { entry: CatalogEntry; siblings: CatalogEntry[] }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const settings = useQuery({ queryKey: ["admin", "settings"], queryFn: ({ signal }) => get<AdminSetting[]>("/admin/settings", signal) });
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const keys = entry.missingConfig;
+  const shared = siblings.filter((x) => x.id !== entry.id && x.oauth && x.missingConfig.some((k) => keys.includes(k)));
+  const redirects = [entry, ...shared].filter((x) => x.redirectUri);
+  const copy = async (t: string) => { try { await navigator.clipboard.writeText(t); toast("Copied"); } catch { /* clipboard blocked */ } };
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      for (const k of keys) await put(`/admin/settings/${k}`, { value: values[k]!.trim() });
+      await qc.invalidateQueries({ queryKey: ["b"] });
+      await qc.invalidateQueries({ queryKey: ["admin"] });
+      toast(`Sign-in turned on for ${[entry, ...shared].map((x) => x.name).join(", ")}`);
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const meta = (k: string) => settings.data?.find((x) => x.key === k);
+  return (
+    <div className="space-y-4 rounded-[4px] border border-accent/40 bg-accent/5 p-4">
+      <div>
+        <p className="font-medium text-fg">Turn on “Sign in with {entry.name}” — once, for everyone</p>
+        <p className="mt-1 text-xs text-muted">You're a platform administrator. Register Jarvis with {entry.name} once (steps below), paste the {keys.length} value{keys.length === 1 ? "" : "s"} here, and from then on you and every customer just click Sign in.{shared.length ? ` This also turns on sign-in for ${shared.map((x) => x.name).join(", ")}.` : ""}</p>
+      </div>
+      {entry.guide?.adminSetup && <Steps steps={entry.guide.adminSetup} />}
+      {redirects.length > 0 && (
+        <div className="space-y-1.5">
+          <p className="text-xs font-medium text-fg">Redirect URL{redirects.length > 1 ? "s" : ""} to register</p>
+          {redirects.map((x) => (
+            <div key={x.id} className="flex items-center gap-2 rounded-[4px] border border-line bg-panel-2/60 px-2 py-1.5">
+              <code className="min-w-0 flex-1 break-all font-mono text-[11px] text-muted">{x.redirectUri}</code>
+              <Button size="sm" variant="ghost" onClick={() => copy(x.redirectUri!)}>Copy</Button>
+            </div>
+          ))}
+        </div>
+      )}
+      {keys.map((k) => {
+        const m = meta(k);
+        return (
+          <Field key={k} label={m ? `${m.group} · ${m.label}` : k} hint={m?.help ?? undefined}>{(p) => (
+            <Input {...p} type={m?.secret ? "password" : "text"} autoComplete="off" spellCheck={false} value={values[k] ?? ""} onChange={(e) => setValues({ ...values, [k]: e.target.value })} />
+          )}</Field>
+        );
+      })}
+      {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+      <div className="flex justify-end">
+        <Button variant="primary" loading={busy} disabled={keys.some((k) => !values[k]?.trim())} onClick={save} icon={<KeyRound className="size-4" />}>Save and turn on sign-in</Button>
+      </div>
+    </div>
+  );
+}
+
+function ConnectDialog({ entry, onClose, reconnectId, onConnected, readOnly, siblings }: { entry: CatalogEntry | null; onClose: () => void; reconnectId?: string; onConnected: (connectionId: string) => void; readOnly?: boolean; siblings?: CatalogEntry[] }) {
   const b = useBusiness();
   const me = useMe();
   const [values, setValues] = useState<Record<string, string>>({});
@@ -330,9 +397,10 @@ function ConnectDialog({ entry, onClose, reconnectId, onConnected, readOnly }: {
   const [variant, setVariant] = useState<string | null>(null);
   useEffect(() => {
     setValues({}); setError(null);
-    setMethod(entry && !oauthReady && entry.tokenConnect ? "token" : "oauth");
+    const adminCanEnable = Boolean(me.data?.user.isPlatformAdmin && entry?.oauth && entry.status === "config_required");
+    setMethod(entry && !oauthReady && !adminCanEnable && entry.tokenConnect ? "token" : "oauth");
     setVariant(entry?.tokenConnect?.variants?.[0]?.id ?? null);
-  }, [entry?.id, oauthReady]);
+  }, [entry?.id, oauthReady, me.data?.user.isPlatformAdmin]);
   if (!entry) return null;
   const token = entry.tokenConnect;
   const v = token?.variants?.find((x) => x.id === variant) ?? null;
@@ -369,12 +437,13 @@ function ConnectDialog({ entry, onClose, reconnectId, onConnected, readOnly }: {
         <p className="text-muted">{entry.description}</p>
         {guide && <p className="rounded-[4px] border border-accent/30 bg-accent/5 px-3 py-2 text-fg">{guide.summary}</p>}
         {token && entry.oauth && (
-          <Tabs value={method} onChange={(x) => { setMethod(x); setError(null); }} items={[{ value: "token", label: "Connect with a key / token" }, { value: "oauth", label: `Sign in with ${entry.name}` }]} />
+          <Tabs value={method} onChange={(x) => { setMethod(x); setError(null); }} items={[{ value: "oauth", label: `Sign in with ${entry.name}` }, { value: "token", label: "Connect with a key / token" }]} />
         )}
 
         {method === "oauth" && (
           <>
-            {entry.status === "config_required" && (
+            {entry.status === "config_required" && me.data?.user.isPlatformAdmin && !readOnly && <SignInSetup entry={entry} siblings={siblings ?? []} />}
+            {entry.status === "config_required" && !me.data?.user.isPlatformAdmin && (
               <Prerequisite tone="warning" title="One-click sign-in isn't set up yet">
                 A platform administrator adds the {entry.name} app credentials once in <b>Platform admin → Credentials</b> (<code className="text-fg">{entry.missingConfig.join(", ")}</code>) — the steps are under “Enable one-click sign-in” below.{token ? " Meanwhile, use “Connect with a key / token”." : ""}
               </Prerequisite>

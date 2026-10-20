@@ -53,7 +53,8 @@ describe("connecting without the platform's OAuth apps", () => {
     const ga4 = cat.find((c: any) => c.id === "ga4");
     expect(ga4.status).toBe("config_required");
     expect(ga4.tokenConnect.variants.map((v: any) => v.id)).toEqual(["service_account", "own_client"]);
-    expect(ga4.guide.adminSetup.join(" ")).toContain("https://api.example.test/api/oauth/ga4/callback");
+    expect(ga4.guide.adminSetup.length).toBeGreaterThan(3);
+    expect(ga4.redirectUri).toBe("https://api.example.test/api/oauth/ga4/callback");
     expect(cat.find((c: any) => c.id === "google_sheets").tokenConnect.variants.map((v: any) => v.id)).toEqual(["published", "service_account"]);
     expect(cat.find((c: any) => c.id === "quickbooks").tokenConnect.fields.map((f: any) => f.key)).toContain("realmId");
   });
