@@ -20,6 +20,7 @@ export interface ConnectorGuide {
 
 const metaAdmin = (perms: string) => [
   "At developers.facebook.com → My Apps → Create app, choose “Other” → “Business” and link it to your Business portfolio.",
+  "App settings → Basic: add this site's domain under App domains, then “+ Add platform” → Website with this site's address as Site URL, and save (otherwise Facebook says the domain isn't included in the app's domains).",
   "Add the “Facebook Login for Business” product. Under its Settings add {redirectUri} as a Valid OAuth Redirect URI (add the Pages and Instagram redirect URLs too to use one app for all three).",
   "Facebook Login for Business → Configurations → Create configuration: choose “User access token”, tick ads_read, business_management, pages_show_list, pages_read_engagement, read_insights, instagram_basic and instagram_manage_insights, and copy the Configuration ID.",
   "Copy the App ID and App secret (App settings → Basic) and paste them here with the Configuration ID.",
