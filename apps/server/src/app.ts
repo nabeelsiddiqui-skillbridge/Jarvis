@@ -92,7 +92,8 @@ export function createApp() {
   const webDist = [path.resolve(here, "../../web/dist"), path.resolve(here, "../web/dist")].find((p) => existsSync(p));
   if (webDist) {
     app.use(express.static(webDist, { index: false, maxAge: "1h" }));
-    app.get(/^\/(?!api\/).*/, (_req, res) => res.sendFile(path.join(webDist, "index.html")));
+    // The page itself is never cached, so a new deploy is picked up on the next load (assets are content-hashed).
+    app.get(/^\/(?!api\/).*/, (_req, res) => { res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate"); res.sendFile(path.join(webDist, "index.html")); });
   }
 
   app.use(errorHandler);
