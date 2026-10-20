@@ -334,6 +334,9 @@ function SignInSetup({ entry, siblings }: { entry: CatalogEntry; siblings: Catal
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const keys = entry.missingConfig;
+  // Optional settings of the same provider app (e.g. Meta's login configuration ID).
+  const groups = new Set((settings.data ?? []).filter((x) => keys.includes(x.key)).map((x) => x.group));
+  const optional = (settings.data ?? []).filter((x) => groups.has(x.group) && !keys.includes(x.key) && !x.configured && x.key !== "GOOGLE_ADS_DEVELOPER_TOKEN");
   const shared = siblings.filter((x) => x.id !== entry.id && x.oauth && x.missingConfig.some((k) => keys.includes(k)));
   const redirects = [entry, ...shared].filter((x) => x.redirectUri);
   const copy = async (t: string) => { try { await navigator.clipboard.writeText(t); toast("Copied"); } catch { /* clipboard blocked */ } };
@@ -342,6 +345,7 @@ function SignInSetup({ entry, siblings }: { entry: CatalogEntry; siblings: Catal
     setError(null);
     try {
       for (const k of keys) await put(`/admin/settings/${k}`, { value: values[k]!.trim() });
+      for (const o of optional) if (values[o.key]?.trim()) await put(`/admin/settings/${o.key}`, { value: values[o.key]!.trim() });
       await qc.invalidateQueries({ queryKey: ["b"] });
       await qc.invalidateQueries({ queryKey: ["admin"] });
       toast(`Sign-in turned on for ${[entry, ...shared].map((x) => x.name).join(", ")}`);
@@ -378,6 +382,11 @@ function SignInSetup({ entry, siblings }: { entry: CatalogEntry; siblings: Catal
           )}</Field>
         );
       })}
+      {optional.map((m) => (
+        <Field key={m.key} label={`${m.group} · ${m.label} (optional)`} hint={m.help ?? undefined}>{(p) => (
+          <Input {...p} type={m.secret ? "password" : "text"} autoComplete="off" spellCheck={false} value={values[m.key] ?? ""} onChange={(e) => setValues({ ...values, [m.key]: e.target.value })} />
+        )}</Field>
+      ))}
       {error && <p role="alert" className="text-sm text-danger">{error}</p>}
       <div className="flex justify-end">
         <Button variant="primary" loading={busy} disabled={keys.some((k) => !values[k]?.trim())} onClick={save} icon={<KeyRound className="size-4" />}>Save and turn on sign-in</Button>

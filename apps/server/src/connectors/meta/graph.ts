@@ -170,6 +170,9 @@ export const META_OAUTH_KEYS = ["META_APP_ID", "META_APP_SECRET"];
 
 export function metaAuthorizeUrl(scopes: string[], state: string, redirectUri: string) {
   const q = new URLSearchParams({ client_id: process.env.META_APP_ID!, redirect_uri: redirectUri, state, scope: scopes.join(","), response_type: "code" });
+  // Business apps (Facebook Login for Business) ask for the permissions in a login configuration instead of `scope`.
+  const configId = process.env.META_LOGIN_CONFIG_ID?.trim();
+  if (configId) { q.delete("scope"); q.set("config_id", configId); }
   return `${M(`https://www.facebook.com/${GRAPH_VERSION()}/dialog/oauth`)}?${q}`;
 }
 

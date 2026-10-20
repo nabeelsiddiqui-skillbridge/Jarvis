@@ -21,7 +21,8 @@ export interface ConnectorGuide {
 const metaAdmin = (perms: string) => [
   "At developers.facebook.com → My Apps → Create app, choose “Other” → “Business” and link it to your Business portfolio.",
   "Add the “Facebook Login for Business” product. Under its Settings add {redirectUri} as a Valid OAuth Redirect URI (add the Pages and Instagram redirect URLs too to use one app for all three).",
-  "Copy the App ID and App secret (App settings → Basic) and paste them here.",
+  "Facebook Login for Business → Configurations → Create configuration: choose “User access token”, tick ads_read, business_management, pages_show_list, pages_read_engagement, read_insights, instagram_basic and instagram_manage_insights, and copy the Configuration ID.",
+  "Copy the App ID and App secret (App settings → Basic) and paste them here with the Configuration ID.",
   `That's enough for you and anyone with a role on the app (App roles → add teammates) to sign in right away. To let outside customers sign in, request Advanced access for ${perms} under App Review and switch the app to Live.`,
 ];
 

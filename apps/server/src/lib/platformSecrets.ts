@@ -20,6 +20,7 @@ export const MANAGED_SETTINGS: ManagedSetting[] = [
   { key: "HUBSPOT_CLIENT_SECRET", label: "Client secret", group: "HubSpot", secret: true },
   { key: "META_APP_ID", label: "App ID", group: "Meta (Ads, Pages, Instagram)", secret: false, help: "developers.facebook.com → your app → App settings → Basic. Optional: without it, users connect with an access token." },
   { key: "META_APP_SECRET", label: "App secret", group: "Meta (Ads, Pages, Instagram)", secret: true },
+  { key: "META_LOGIN_CONFIG_ID", label: "Login configuration ID (Facebook Login for Business)", group: "Meta (Ads, Pages, Instagram)", secret: false, help: "Business-type apps: Facebook Login for Business → Configurations → create one (User access token, with ads_read, business_management, pages_show_list, pages_read_engagement, read_insights, instagram_basic, instagram_manage_insights) and paste its ID." },
   { key: "TIKTOK_APP_ID", label: "App ID", group: "TikTok Ads", secret: false, help: "TikTok for Business developers → My apps. Optional: without it, users connect with an access token." },
   { key: "TIKTOK_APP_SECRET", label: "App secret", group: "TikTok Ads", secret: true },
   { key: "LINKEDIN_CLIENT_ID", label: "Client ID", group: "LinkedIn Ads", secret: false, help: "linkedin.com/developers → your app (with Advertising API access) → Auth." },
