@@ -467,6 +467,12 @@ function ConnectDialog({ entry, onClose, reconnectId, onConnected, readOnly, sib
 
         {method === "token" && token && (
           <>
+            {entry.oauth && !readOnly && (entry.status === "available" || (entry.status === "config_required" && me.data?.user.isPlatformAdmin)) && (
+              <button type="button" onClick={() => { setMethod("oauth"); setError(null); }}
+                className="w-full rounded-[4px] border border-accent/40 bg-accent/5 px-3 py-2.5 text-left text-sm text-fg hover:bg-accent/10">
+                <b>Easier: Sign in with {entry.name}</b> — no tokens to copy.{entry.status === "config_required" ? " As platform admin, paste the app's client ID and secret once and everyone can sign in." : ""} →
+              </button>
+            )}
             {token.variants && token.variants.length > 1 && (
               <div role="radiogroup" aria-label="How to connect" className="flex flex-wrap gap-1.5">
                 {token.variants.map((x) => (
